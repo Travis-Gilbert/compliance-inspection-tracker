@@ -1,0 +1,24 @@
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-dotenv==1.0.1
+python-multipart==0.0.18
+
+# Database
+aiosqlite==0.20.0
+
+# HTTP client (async for Google API calls)
+httpx==0.28.1
+
+# Data processing
+pandas==2.2.3
+pydantic==2.10.4
+
+# Image analysis
+Pillow==11.1.0
+numpy==2.2.1
+
+# Address parsing
+usaddress==0.5.10
+
+# CSV handling is stdlib (csv module)

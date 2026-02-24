@@ -1,20 +1,25 @@
 import { Routes, Route } from "react-router-dom";
 import Layout from "./components/Layout";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 import ReviewQueue from "./pages/ReviewQueue";
 import PropertyDetail from "./pages/PropertyDetail";
 import Import from "./pages/Import";
 import Export from "./pages/Export";
 
+function PageBoundary({ children }) {
+  return <ErrorBoundary>{children}</ErrorBoundary>;
+}
+
 export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/review" element={<ReviewQueue />} />
-        <Route path="/property/:id" element={<PropertyDetail />} />
-        <Route path="/import" element={<Import />} />
-        <Route path="/export" element={<Export />} />
+        <Route path="/" element={<PageBoundary><Dashboard /></PageBoundary>} />
+        <Route path="/review" element={<PageBoundary><ReviewQueue /></PageBoundary>} />
+        <Route path="/property/:id" element={<PageBoundary><PropertyDetail /></PageBoundary>} />
+        <Route path="/import" element={<PageBoundary><Import /></PageBoundary>} />
+        <Route path="/export" element={<PageBoundary><Export /></PageBoundary>} />
       </Routes>
     </Layout>
   );

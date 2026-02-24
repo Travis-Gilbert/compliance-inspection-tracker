@@ -185,3 +185,133 @@ async def run_pipeline(
                 results["steps"].append({"detection": {"analyzed": 0, "message": "All analyzed"}})
 
     return results
+
+
+# --- Pipeline SSE endpoint: stream progress updates ---
+
+@app.post("/api/pipeline/process-stream")
+async def run_pipeline_stream(
+    geocode: bool = True,
+    fetch_images: bool = True,
+    run_detection: bool = True,
+    limit: int = 25,
+):
+    """
+    Stream pipeline progress via Server-Sent Events.
+    Each event is a JSON object with step name, status, and counts.
+    """
+    import asyncio
+    import json as json_mod
+    import aiosqlite
+    from datetime import datetime
+    from starlette.responses import StreamingResponse
+    from app.config import DATABASE_PATH
+
+    async def event_generator():
+        def sse(data: dict) -> str:
+            return f"data: {json_mod.dumps(data)}\n\n"
+
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            db.row_factory = aiosqlite.Row
+
+            # Step 1: Geocode
+            if geocode:
+                cursor = await db.execute(
+                    "SELECT id, address FROM properties WHERE latitude IS NULL LIMIT ?", [limit]
+                )
+                rows = await cursor.fetchall()
+                total = len(rows)
+                yield sse({"step": "geocode", "status": "started", "total": total})
+
+                if rows:
+                    from app.services.geocoder import batch_geocode
+                    addresses = [r["address"] for r in rows]
+                    geo_results = await batch_geocode(addresses)
+                    processed = 0
+                    for row in rows:
+                        result = geo_results.get(row["address"])
+                        if result:
+                            await db.execute("""
+                                UPDATE properties SET latitude=?, longitude=?, formatted_address=?,
+                                geocoded_at=?, updated_at=? WHERE id=?
+                            """, [result.lat, result.lng, result.formatted_address,
+                                  datetime.now().isoformat(), datetime.now().isoformat(), row["id"]])
+                            processed += 1
+                    await db.commit()
+                    yield sse({"step": "geocode", "status": "done", "processed": processed, "total": total})
+                else:
+                    yield sse({"step": "geocode", "status": "done", "processed": 0, "total": 0, "message": "All geocoded"})
+
+            # Step 2: Fetch imagery
+            if fetch_images:
+                cursor = await db.execute("""
+                    SELECT id, address, latitude, longitude FROM properties
+                    WHERE latitude IS NOT NULL AND imagery_fetched_at IS NULL LIMIT ?
+                """, [limit])
+                rows = await cursor.fetchall()
+                total = len(rows)
+                yield sse({"step": "imagery", "status": "started", "total": total})
+
+                if rows:
+                    from app.services.imagery import fetch_imagery_for_property
+                    fetched = 0
+                    for i, row in enumerate(rows):
+                        prop = dict(row)
+                        try:
+                            result = await fetch_imagery_for_property(
+                                prop["latitude"], prop["longitude"], prop["address"]
+                            )
+                            await db.execute("""
+                                UPDATE properties SET streetview_path=?, streetview_available=?,
+                                streetview_date=?, satellite_path=?, imagery_fetched_at=?, updated_at=?
+                                WHERE id=?
+                            """, [result.streetview_path, 1 if result.streetview_available else 0,
+                                  result.streetview_date, result.satellite_path,
+                                  datetime.now().isoformat(), datetime.now().isoformat(), prop["id"]])
+                            fetched += 1
+                        except Exception:
+                            pass
+                        # Emit progress every property
+                        yield sse({"step": "imagery", "status": "progress", "current": i + 1, "total": total})
+                    await db.commit()
+                    yield sse({"step": "imagery", "status": "done", "processed": fetched, "total": total})
+                else:
+                    yield sse({"step": "imagery", "status": "done", "processed": 0, "total": 0, "message": "All imagery fetched"})
+
+            # Step 3: Detection
+            if run_detection:
+                cursor = await db.execute("""
+                    SELECT id, streetview_path, satellite_path FROM properties
+                    WHERE imagery_fetched_at IS NOT NULL AND detection_ran_at IS NULL LIMIT ?
+                """, [limit])
+                rows = await cursor.fetchall()
+                total = len(rows)
+                yield sse({"step": "detection", "status": "started", "total": total})
+
+                if rows:
+                    from app.services.detector import detect_property_condition
+                    analyzed = 0
+                    label_counts = {}
+                    for i, row in enumerate(rows):
+                        prop = dict(row)
+                        try:
+                            result = detect_property_condition(prop.get("streetview_path"), prop.get("satellite_path"))
+                            await db.execute("""
+                                UPDATE properties SET detection_score=?, detection_label=?,
+                                detection_details=?, detection_ran_at=?, updated_at=?
+                                WHERE id=?
+                            """, [result.score, result.label, json_mod.dumps(result.details),
+                                  datetime.now().isoformat(), datetime.now().isoformat(), prop["id"]])
+                            analyzed += 1
+                            label_counts[result.label] = label_counts.get(result.label, 0) + 1
+                        except Exception:
+                            pass
+                        yield sse({"step": "detection", "status": "progress", "current": i + 1, "total": total})
+                    await db.commit()
+                    yield sse({"step": "detection", "status": "done", "processed": analyzed, "total": total, "summary": label_counts})
+                else:
+                    yield sse({"step": "detection", "status": "done", "processed": 0, "total": 0, "message": "All analyzed"})
+
+            yield sse({"step": "complete", "status": "done"})
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

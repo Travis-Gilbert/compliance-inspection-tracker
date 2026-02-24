@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getProperties, updateProperty, getStats } from "../utils/api";
 import { FINDINGS, DETECTION_LABELS } from "../utils/constants";
+import { ReviewQueueSkeleton } from "../components/LoadingSkeleton";
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All" },
@@ -111,7 +112,7 @@ export default function ReviewQueue() {
 
       {/* Property list */}
       {loading ? (
-        <div className="text-gray-400 py-8 text-center">Loading properties...</div>
+        <ReviewQueueSkeleton />
       ) : properties.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
           <p className="text-gray-500">No properties match this filter.</p>

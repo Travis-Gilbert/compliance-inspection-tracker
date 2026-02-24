@@ -1,12 +1,88 @@
-import { useState, useEffect } from "react";
-import { getStats, getImageryStatus, runPipeline } from "../utils/api";
+import { useState, useEffect, useRef } from "react";
+import { getStats, getImageryStatus, runPipelineStream } from "../utils/api";
 import { FINDINGS, DETECTION_LABELS } from "../utils/constants";
+import { DashboardSkeleton } from "../components/LoadingSkeleton";
+
+const STEP_LABELS = {
+  geocode: "Geocoding addresses",
+  imagery: "Fetching imagery",
+  detection: "Running detection",
+};
+
+function PipelineProgress({ events }) {
+  if (!events.length) return null;
+
+  const steps = ["geocode", "imagery", "detection"];
+  const stepState = {};
+  for (const e of events) {
+    if (e.step && e.step !== "complete") {
+      stepState[e.step] = e;
+    }
+  }
+  const complete = events.some(e => e.step === "complete");
+
+  return (
+    <div className="mt-4 space-y-2">
+      {steps.map(step => {
+        const state = stepState[step];
+        if (!state) return null;
+
+        const isDone = state.status === "done";
+        const isProgress = state.status === "progress";
+        const pct = isProgress && state.total > 0
+          ? Math.round((state.current / state.total) * 100)
+          : isDone ? 100 : 0;
+
+        return (
+          <div key={step} className="flex items-center gap-3">
+            <div className="w-4 h-4 flex-shrink-0">
+              {isDone ? (
+                <svg className="w-4 h-4 text-civic-green" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <div className="w-3 h-3 border-2 border-civic-green border-t-transparent rounded-full animate-spin mt-0.5" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-700">
+                  {STEP_LABELS[step]}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {isDone
+                    ? `${state.processed}/${state.total} done`
+                    : isProgress
+                      ? `${state.current}/${state.total}`
+                      : `0/${state.total}`
+                  }
+                </span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+                <div
+                  className="bg-civic-green rounded-full h-1.5 transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {complete && (
+        <div className="text-xs text-civic-green font-medium pt-1">
+          Pipeline complete
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [apiStatus, setApiStatus] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [pipelineResult, setPipelineResult] = useState(null);
+  const [pipelineEvents, setPipelineEvents] = useState([]);
+  const cancelRef = useRef(null);
 
   const loadData = async () => {
     try {
@@ -22,18 +98,26 @@ export default function Dashboard() {
 
   const handleProcess = async () => {
     setProcessing(true);
-    setPipelineResult(null);
+    setPipelineEvents([]);
+
+    const { promise, cancel } = runPipelineStream(25, (event) => {
+      setPipelineEvents(prev => [...prev, event]);
+    });
+    cancelRef.current = cancel;
+
     try {
-      const result = await runPipeline(25);
-      setPipelineResult(result);
+      await promise;
       await loadData();
     } catch (e) {
-      setPipelineResult({ error: e.message });
+      if (e.name !== "AbortError") {
+        setPipelineEvents(prev => [...prev, { step: "error", message: e.message }]);
+      }
     }
     setProcessing(false);
+    cancelRef.current = null;
   };
 
-  if (!stats) return <div className="text-gray-500 py-8">Loading...</div>;
+  if (!stats) return <DashboardSkeleton />;
 
   const pct = stats.percent_reviewed || 0;
 
@@ -105,11 +189,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {pipelineResult && (
-          <pre className="mt-3 text-xs bg-gray-50 rounded p-3 overflow-auto font-mono text-gray-700">
-            {JSON.stringify(pipelineResult, null, 2)}
-          </pre>
-        )}
+        <PipelineProgress events={pipelineEvents} />
       </div>
 
       {/* Detection breakdown */}

@@ -118,6 +118,9 @@ def parse_csv_text(text: str, filename: str = "") -> tuple[list[PropertyCreate],
 
     # Normalize line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # FileMaker uses \x0b (vertical tab) as a line separator within fields.
+    # Replace with comma+space so multi-line addresses become "307 Mason St, Flint MI"
+    text = text.replace("\x0b", ", ")
 
     batch_id = str(uuid.uuid4())[:8]
     delimiter = detect_delimiter(text)

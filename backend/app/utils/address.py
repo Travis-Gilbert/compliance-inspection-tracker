@@ -27,6 +27,8 @@ def normalize_address(address: str) -> str:
         return ""
 
     addr = address.strip()
+    # FileMaker uses \x0b (vertical tab) as line separator within fields
+    addr = addr.replace("\x0b", ", ")
     # Remove extra whitespace
     addr = re.sub(r"\s+", " ", addr)
     # Standardize directional prefixes

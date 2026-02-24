@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { getProperty, updateProperty, getImageUrl } from "../utils/api";
 import { FINDINGS, DETECTION_LABELS } from "../utils/constants";
+import { PropertyDetailSkeleton } from "../components/LoadingSkeleton";
 
 export default function PropertyDetail() {
   const { id } = useParams();
@@ -53,7 +54,34 @@ export default function PropertyDetail() {
     setSaving(false);
   };
 
-  if (!property) return <div className="text-gray-400 py-8">Loading...</div>;
+  // Keyboard shortcuts: arrows for prev/next, 1-6 for findings, Esc for back
+  useEffect(() => {
+    const handler = (e) => {
+      // Skip when typing in inputs or textareas
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (saving) return;
+
+      if (e.key === "ArrowLeft" && prevId) {
+        e.preventDefault();
+        navigateTo(prevId);
+      } else if (e.key === "ArrowRight" && nextId) {
+        e.preventDefault();
+        navigateTo(nextId);
+      } else if (e.key === "Escape") {
+        navigate("/review");
+      } else if (e.key >= "1" && e.key <= "6" && property) {
+        const idx = parseInt(e.key) - 1;
+        if (idx < FINDINGS.length) {
+          handleFinding(FINDINGS[idx].value);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [prevId, nextId, saving, property, navigate, notes]);
+
+  if (!property) return <PropertyDetailSkeleton />;
 
   const detection = DETECTION_LABELS[property.detection_label];
   const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(property.formatted_address || property.address + ", Flint, MI")}`;
@@ -197,11 +225,16 @@ export default function PropertyDetail() {
 
       {/* Finding selector */}
       <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <div className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">
-          Record Your Finding
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs text-gray-500 uppercase tracking-wide font-medium">
+            Record Your Finding
+          </span>
+          <span className="text-xs text-gray-400 hidden md:inline">
+            Keys: 1-6 findings, arrows prev/next, Esc back
+          </span>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {FINDINGS.map(f => (
+          {FINDINGS.map((f, i) => (
             <button
               key={f.value}
               onClick={() => handleFinding(f.value)}
@@ -214,6 +247,7 @@ export default function PropertyDetail() {
                 opacity: property.finding && property.finding !== f.value ? 0.5 : 1,
               }}
             >
+              <span className="hidden md:inline text-[10px] opacity-60 mr-1">{i + 1}</span>
               {f.label}
             </button>
           ))}

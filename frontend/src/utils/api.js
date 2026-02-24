@@ -79,6 +79,38 @@ export const getDetectionSummary = () =>
 export const runPipeline = (limit = 25) =>
   request(`/api/pipeline/process?limit=${limit}`, { method: "POST" }).then(r => r.json());
 
+// Pipeline with SSE progress streaming
+export const runPipelineStream = (limit = 25, onEvent) => {
+  const controller = new AbortController();
+  const run = async () => {
+    const res = await fetch(`/api/pipeline/process-stream?limit=${limit}`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Pipeline error: ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop();
+      for (const chunk of lines) {
+        const dataLine = chunk.trim();
+        if (dataLine.startsWith("data: ")) {
+          try {
+            const event = JSON.parse(dataLine.slice(6));
+            onEvent(event);
+          } catch { /* skip malformed */ }
+        }
+      }
+    }
+  };
+  return { promise: run(), cancel: () => controller.abort() };
+};
+
 // Communications
 export const getComms = (propertyId) =>
   request(`/api/communications/${propertyId}`).then(r => r.json());

@@ -30,6 +30,12 @@ export const updateProperty = (id, data) =>
 export const deleteProperty = (id) =>
   request(`/api/properties/${id}`, { method: "DELETE" }).then(r => r.json());
 
+export const batchUpdateProperties = (propertyIds, finding, notes = "") =>
+  request("/api/properties/batch-update", {
+    method: "POST",
+    body: JSON.stringify({ property_ids: propertyIds, finding, notes }),
+  }).then(r => r.json());
+
 export const importCSV = async (file) => {
   const formData = new FormData();
   formData.append("file", file);
@@ -84,6 +90,38 @@ export const runPipelineStream = (limit = 25, onEvent) => {
   const controller = new AbortController();
   const run = async () => {
     const res = await fetch(`/api/pipeline/process-stream?limit=${limit}`, {
+      method: "POST",
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`Pipeline error: ${res.status}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n\n");
+      buffer = lines.pop();
+      for (const chunk of lines) {
+        const dataLine = chunk.trim();
+        if (dataLine.startsWith("data: ")) {
+          try {
+            const event = JSON.parse(dataLine.slice(6));
+            onEvent(event);
+          } catch { /* skip malformed */ }
+        }
+      }
+    }
+  };
+  return { promise: run(), cancel: () => controller.abort() };
+};
+
+// Pipeline: process ALL remaining properties with auto-continue
+export const runPipelineAll = (batchSize = 100, onEvent) => {
+  const controller = new AbortController();
+  const run = async () => {
+    const res = await fetch(`/api/pipeline/process-all?batch_size=${batchSize}`, {
       method: "POST",
       signal: controller.signal,
     });

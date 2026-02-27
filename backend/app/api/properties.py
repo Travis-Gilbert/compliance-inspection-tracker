@@ -24,7 +24,7 @@ def row_to_dict(row) -> dict:
 
 # --- List & Filter ---
 
-@router.get("/", response_model=list[PropertyResponse])
+@router.get("/")
 async def list_properties(
     finding: str = Query(None),
     detection: str = Query(None),
@@ -37,7 +37,7 @@ async def list_properties(
     offset: int = Query(0),
     db: aiosqlite.Connection = Depends(get_db),
 ):
-    """List properties with optional filters."""
+    """List properties with optional filters. Returns {properties, total, limit, offset}."""
     conditions = []
     params = []
 
@@ -63,6 +63,11 @@ async def list_properties(
     sort_col = sort if sort in allowed_sorts else "created_at"
     sort_order = "ASC" if order.lower() == "asc" else "DESC"
 
+    # Get total count for pagination
+    count_query = f"SELECT COUNT(*) as n FROM properties p {where}"
+    count_cursor = await db.execute(count_query, params[:])
+    total = (await count_cursor.fetchone())["n"]
+
     query = f"""
         SELECT p.*, COALESCE(
             (SELECT COUNT(*) FROM communications c WHERE c.property_id = p.id), 0
@@ -76,7 +81,7 @@ async def list_properties(
 
     cursor = await db.execute(query, params)
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    return {"properties": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
 
 # --- Single Property ---
@@ -147,6 +152,40 @@ async def delete_property(property_id: int, db: aiosqlite.Connection = Depends(g
     await db.execute("DELETE FROM properties WHERE id = ?", [property_id])
     await db.commit()
     return {"deleted": True}
+
+
+# --- Batch Update ---
+
+from pydantic import BaseModel
+from typing import List
+
+
+class BatchUpdateRequest(BaseModel):
+    property_ids: List[int]
+    finding: str
+    notes: str = ""
+
+
+@router.post("/batch-update")
+async def batch_update_properties(req: BatchUpdateRequest, db: aiosqlite.Connection = Depends(get_db)):
+    """Batch update finding for multiple properties at once."""
+    now = datetime.now().isoformat()
+    updated = 0
+    for pid in req.property_ids:
+        await db.execute("""
+            UPDATE properties SET finding=?, reviewed_at=?, updated_at=?
+            WHERE id=?
+        """, [req.finding, now, now, pid])
+        if req.notes:
+            await db.execute("""
+                UPDATE properties SET notes=CASE
+                    WHEN notes IS NULL OR notes='' THEN ?
+                    ELSE notes || '\n' || ?
+                END WHERE id=?
+            """, [req.notes, req.notes, pid])
+        updated += 1
+    await db.commit()
+    return {"updated": updated}
 
 
 # --- CSV Import ---

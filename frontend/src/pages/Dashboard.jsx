@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { getStats, getImageryStatus, runPipelineStream } from "../utils/api";
+import { getStats, getImageryStatus, runPipelineStream, runPipelineAll } from "../utils/api";
 import { FINDINGS, DETECTION_LABELS } from "../utils/constants";
 import { DashboardSkeleton } from "../components/LoadingSkeleton";
 
@@ -14,21 +14,52 @@ function PipelineProgress({ events }) {
 
   const steps = ["geocode", "imagery", "detection"];
   const stepState = {};
+  let grandTotals = null;
+  let grandProcessed = 0;
+
   for (const e of events) {
-    if (e.step && e.step !== "complete") {
+    if (e.step === "init" && e.grand_totals) {
+      grandTotals = e.grand_totals;
+    }
+    if (e.step && e.step !== "complete" && e.step !== "init") {
       stepState[e.step] = e;
+    }
+    if (e.grand_processed != null) {
+      grandProcessed = e.grand_processed;
     }
   }
   const complete = events.some(e => e.step === "complete");
 
+  const grandTotal = grandTotals?.total || 0;
+  const grandPct = grandTotal > 0 ? Math.round((grandProcessed / grandTotal) * 100) : 0;
+
   return (
     <div className="mt-4 space-y-2">
+      {/* Grand total progress bar (shown for process-all) */}
+      {grandTotals && (
+        <div className="mb-3 pb-3 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-semibold text-gray-800">Overall progress</span>
+            <span className="text-xs font-medium text-civic-green">{grandPct}%</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-2">
+            <div
+              className="bg-civic-green rounded-full h-2 transition-all duration-300"
+              style={{ width: `${grandPct}%` }}
+            />
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            {grandProcessed} / {grandTotal} properties processed
+          </div>
+        </div>
+      )}
+
       {steps.map(step => {
         const state = stepState[step];
         if (!state) return null;
 
         const isDone = state.status === "done";
-        const isProgress = state.status === "progress";
+        const isProgress = state.status === "progress" || state.status === "batch_complete";
         const pct = isProgress && state.total > 0
           ? Math.round((state.current / state.total) * 100)
           : isDone ? 100 : 0;
@@ -70,7 +101,7 @@ function PipelineProgress({ events }) {
       })}
       {complete && (
         <div className="text-xs text-civic-green font-medium pt-1">
-          Pipeline complete
+          Pipeline complete {grandProcessed > 0 ? `(${grandProcessed} properties processed)` : ""}
         </div>
       )}
     </div>
@@ -115,6 +146,34 @@ export default function Dashboard() {
     }
     setProcessing(false);
     cancelRef.current = null;
+  };
+
+  const handleProcessAll = async () => {
+    setProcessing(true);
+    setPipelineEvents([]);
+
+    const { promise, cancel } = runPipelineAll(100, (event) => {
+      setPipelineEvents(prev => [...prev, event]);
+    });
+    cancelRef.current = cancel;
+
+    try {
+      await promise;
+      await loadData();
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        setPipelineEvents(prev => [...prev, { step: "error", message: e.message }]);
+      }
+    }
+    setProcessing(false);
+    cancelRef.current = null;
+  };
+
+  const handleStop = () => {
+    if (cancelRef.current) {
+      cancelRef.current();
+      setPipelineEvents(prev => [...prev, { step: "complete", status: "done", message: "Stopped by user" }]);
+    }
   };
 
   if (!stats) return <DashboardSkeleton />;
@@ -169,7 +228,7 @@ export default function Dashboard() {
         <p className="text-sm text-gray-600 mb-4">
           Import properties, then run the pipeline to geocode addresses, fetch Street View and satellite imagery, and run smart detection. Properties flagged as likely vacant or demolished will sort to the top of your review queue.
         </p>
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={handleProcess}
             disabled={processing || stats.total === 0}
@@ -181,6 +240,27 @@ export default function Dashboard() {
           >
             {processing ? "Processing..." : "Run Pipeline (next 25)"}
           </button>
+
+          <button
+            onClick={handleProcessAll}
+            disabled={processing || stats.total === 0}
+            className={`px-5 py-2 rounded-md text-sm font-medium transition-colors ${
+              processing || stats.total === 0
+                ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                : "bg-civic-blue text-white hover:bg-blue-700"
+            }`}
+          >
+            {processing ? "Processing..." : "Process All Remaining"}
+          </button>
+
+          {processing && (
+            <button
+              onClick={handleStop}
+              className="px-4 py-2 rounded-md text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Stop
+            </button>
+          )}
 
           {apiStatus && (
             <span className={`text-xs ${apiStatus.configured ? "text-civic-green" : "text-orange-500"}`}>

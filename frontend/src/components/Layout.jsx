@@ -1,7 +1,9 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { NAV_ITEMS } from "../utils/constants";
 
 export default function Layout({ children }) {
+  const content = children ?? <Outlet />;
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
       {/* Sidebar */}
@@ -48,7 +50,7 @@ export default function Layout({ children }) {
       {/* Main content */}
       <main className="flex-1 min-w-0">
         <div className="max-w-5xl mx-auto p-4 md:p-6">
-          {children}
+          {content}
         </div>
       </main>
     </div>

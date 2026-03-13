@@ -1,8 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { getProperties, updateProperty, getStats, batchUpdateProperties } from "../utils/api";
+import {
+  getPriorityQueue,
+  updateProperty,
+  getStats,
+  batchUpdateProperties,
+} from "../utils/api";
 import { FINDINGS, DETECTION_LABELS } from "../utils/constants";
 import { ReviewQueueSkeleton } from "../components/LoadingSkeleton";
+
+const PAGE_SIZE = 50;
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All" },
@@ -12,13 +19,11 @@ const FILTER_OPTIONS = [
 ];
 
 const SORT_OPTIONS = [
-  { value: "detection_score", label: "Worst First (Detection)" },
+  { value: "priority", label: "Compliance Priority" },
+  { value: "detection_score", label: "Detection Score" },
   { value: "created_at", label: "Newest First" },
   { value: "address", label: "Address A-Z" },
-  { value: "reviewed_at", label: "Recently Reviewed" },
 ];
-
-const PAGE_SIZE = 50;
 
 export default function ReviewQueue() {
   const [properties, setProperties] = useState([]);
@@ -26,7 +31,7 @@ export default function ReviewQueue() {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState("unreviewed");
-  const [sort, setSort] = useState("detection_score");
+  const [sort, setSort] = useState("priority");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -35,100 +40,105 @@ export default function ReviewQueue() {
   const rowRefs = useRef([]);
   const navigate = useNavigate();
 
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
   const loadProperties = useCallback(async () => {
     setLoading(true);
     try {
       const params = {
+        filter,
         sort,
         order: sort === "address" ? "asc" : "desc",
+        search,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       };
-      if (filter === "unreviewed") params.reviewed = false;
-      else if (filter === "inconclusive") params.finding = "inconclusive";
-      if (search) params.search = search;
-
-      const [result, s] = await Promise.all([getProperties(params), getStats()]);
-      // Handle paginated response
-      const props = result.properties || result;
-      const total = result.total || 0;
-      setProperties(props);
-      setTotalCount(total);
-      setStats(s);
-    } catch (e) {
-      console.error("Failed to load:", e);
+      const [queue, statsSummary] = await Promise.all([getPriorityQueue(params), getStats()]);
+      setProperties(queue.properties || []);
+      setTotalCount(queue.total || 0);
+      setStats(statsSummary);
+    } catch (error) {
+      console.error("Failed to load review queue:", error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [filter, sort, search, page]);
 
-  useEffect(() => { loadProperties(); }, [loadProperties]);
+  useEffect(() => {
+    loadProperties();
+  }, [loadProperties]);
 
-  // Reset page when filter/sort/search changes
-  useEffect(() => { setPage(0); }, [filter, sort, search]);
+  useEffect(() => {
+    setPage(0);
+  }, [filter, sort, search]);
 
   const handleFindingUpdate = async (id, finding) => {
     try {
       await updateProperty(id, { finding });
       await loadProperties();
-    } catch (e) {
-      console.error("Update failed:", e);
+    } catch (error) {
+      console.error("Update failed:", error);
     }
   };
 
-  // --- Feature 5: Bulk selection ---
   const toggleSelect = (id) => {
-    setSelected(prev => {
+    setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };
 
-  const selectAll = () => setSelected(new Set(properties.map(p => p.id)));
+  const selectAll = () => setSelected(new Set(properties.map((prop) => prop.id)));
   const selectNone = () => setSelected(new Set());
 
   const handleBatchUpdate = async (finding) => {
-    const label = FINDINGS.find(f => f.value === finding)?.label || finding;
-    if (!window.confirm(`Mark ${selected.size} properties as "${label}"?`)) return;
+    const label = FINDINGS.find((item) => item.value === finding)?.label || finding;
+    if (!window.confirm(`Mark ${selected.size} properties as "${label}"?`)) {
+      return;
+    }
     try {
       await batchUpdateProperties([...selected], finding);
       setSelected(new Set());
       await loadProperties();
-    } catch (e) {
-      console.error("Batch update failed:", e);
+    } catch (error) {
+      console.error("Batch update failed:", error);
     }
   };
 
-  // --- Feature 3: Keyboard navigation ---
   useEffect(() => {
-    const handler = (e) => {
-      const tag = e.target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    const handler = (event) => {
+      const tag = event.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return;
+      }
 
-      if (e.key === "ArrowDown" || e.key === "j") {
-        e.preventDefault();
-        setFocusedIndex(i => Math.min(i + 1, properties.length - 1));
+      if (event.key === "ArrowDown" || event.key === "j") {
+        event.preventDefault();
+        setFocusedIndex((index) => Math.min(index + 1, properties.length - 1));
         setExpandedId(null);
-      } else if (e.key === "ArrowUp" || e.key === "k") {
-        e.preventDefault();
-        setFocusedIndex(i => Math.max(i - 1, 0));
+      } else if (event.key === "ArrowUp" || event.key === "k") {
+        event.preventDefault();
+        setFocusedIndex((index) => Math.max(index - 1, 0));
         setExpandedId(null);
-      } else if (e.key === "Enter" && focusedIndex >= 0) {
-        e.preventDefault();
+      } else if (event.key === "Enter" && focusedIndex >= 0) {
+        event.preventDefault();
         navigate(`/property/${properties[focusedIndex].id}`, {
-          state: { queueIds: properties.map(p => p.id) },
+          state: { queueIds: properties.map((prop) => prop.id) },
         });
-      } else if (e.key === " " && focusedIndex >= 0) {
-        // Feature 4: spacebar toggle preview
-        e.preventDefault();
-        setExpandedId(prev =>
+      } else if (event.key === " " && focusedIndex >= 0) {
+        event.preventDefault();
+        setExpandedId((prev) =>
           prev === properties[focusedIndex].id ? null : properties[focusedIndex].id
         );
-      } else if (e.key >= "1" && e.key <= "6" && focusedIndex >= 0) {
-        const findingIdx = parseInt(e.key) - 1;
-        if (findingIdx < FINDINGS.length) {
-          handleFindingUpdate(properties[focusedIndex].id, FINDINGS[findingIdx].value);
+      } else if (event.key >= "1" && event.key <= "6" && focusedIndex >= 0) {
+        const findingIndex = parseInt(event.key, 10) - 1;
+        if (findingIndex < FINDINGS.length) {
+          handleFindingUpdate(properties[focusedIndex].id, FINDINGS[findingIndex].value);
         }
       }
     };
@@ -136,57 +146,55 @@ export default function ReviewQueue() {
     return () => window.removeEventListener("keydown", handler);
   }, [focusedIndex, properties, navigate]);
 
-  // Auto-scroll focused row into view
   useEffect(() => {
     if (focusedIndex >= 0 && rowRefs.current[focusedIndex]) {
       rowRefs.current[focusedIndex].scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
   }, [focusedIndex]);
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-
   return (
     <div className="space-y-4">
       <div>
         <h2 className="font-heading text-2xl font-bold text-gray-900">Review Queue</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Work through properties. Click to open detail, or use keyboard: arrows navigate, Enter open, Space preview, 1-6 assign finding.
+          Queue defaults to compliance priority, keyboard and bulk tools stay available for fast review.
         </p>
       </div>
 
-      {/* Filters and search */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex gap-1.5">
-          {FILTER_OPTIONS.map(opt => (
+          {FILTER_OPTIONS.map((option) => (
             <button
-              key={opt.value}
-              onClick={() => setFilter(opt.value)}
+              key={option.value}
+              onClick={() => setFilter(option.value)}
               className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                filter === opt.value
+                filter === option.value
                   ? "bg-civic-green-pale text-civic-green border border-civic-green/20"
                   : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
               }`}
             >
-              {opt.label}
+              {option.label}
             </button>
           ))}
         </div>
+
         <select
           value={sort}
-          onChange={e => setSort(e.target.value)}
+          onChange={(event) => setSort(event.target.value)}
           className="text-xs border border-gray-200 rounded px-2 py-1.5 bg-white text-gray-700"
         >
-          {SORT_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          {SORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
+
         <input
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(event) => setSearch(event.target.value)}
           placeholder="Search address, parcel, buyer..."
           className="text-xs border border-gray-200 rounded px-3 py-1.5 w-48 md:w-64"
         />
-        {/* Select all / none */}
+
         <div className="flex gap-1.5 text-xs text-gray-500">
           <button onClick={selectAll} className="hover:text-gray-700 hover:underline">Select all</button>
           <span>/</span>
@@ -194,7 +202,6 @@ export default function ReviewQueue() {
         </div>
       </div>
 
-      {/* Stats bar + keyboard hint */}
       {stats && (
         <div className="flex items-center gap-4 text-xs text-gray-500 flex-wrap">
           <span>{totalCount} total</span>
@@ -207,48 +214,53 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {/* Property list */}
       {loading ? (
         <ReviewQueueSkeleton />
       ) : properties.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
           <p className="text-gray-500">No properties match this filter.</p>
-          <p className="text-xs text-gray-400 mt-2">Import properties first, then run the pipeline from the Dashboard.</p>
+          <p className="text-xs text-gray-400 mt-2">Import properties, then run the pipeline from the Dashboard.</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {properties.map((prop, i) => {
-            const finding = FINDINGS.find(f => f.value === prop.finding);
-            const detection = DETECTION_LABELS[prop.detection_label];
+          {properties.map((property, index) => {
+            const finding = FINDINGS.find((item) => item.value === property.finding);
+            const detection = DETECTION_LABELS[property.detection_label];
 
             return (
               <div
-                key={prop.id}
-                ref={el => rowRefs.current[i] = el}
+                key={property.id}
+                ref={(element) => {
+                  rowRefs.current[index] = element;
+                }}
                 className={`bg-white border rounded-lg hover:border-gray-300 transition-colors cursor-pointer ${
-                  focusedIndex === i ? "ring-2 ring-civic-green ring-offset-1 border-civic-green" : "border-gray-200"
+                  focusedIndex === index ? "ring-2 ring-civic-green ring-offset-1 border-civic-green" : "border-gray-200"
                 }`}
-                style={{ borderLeftWidth: 3, borderLeftColor: finding ? finding.color : detection ? detection.color : "#E0E0E0" }}
+                style={{
+                  borderLeftWidth: 3,
+                  borderLeftColor: finding ? finding.color : detection ? detection.color : "#E0E0E0",
+                }}
               >
                 <div
                   className="flex items-center gap-3 p-3"
-                  onClick={() => navigate(`/property/${prop.id}`, {
-                    state: { queueIds: properties.map(p => p.id) }
+                  onClick={() => navigate(`/property/${property.id}`, {
+                    state: { queueIds: properties.map((item) => item.id) },
                   })}
                 >
-                  {/* Checkbox for bulk selection */}
                   <input
                     type="checkbox"
-                    checked={selected.has(prop.id)}
-                    onChange={(e) => { e.stopPropagation(); toggleSelect(prop.id); }}
-                    onClick={(e) => e.stopPropagation()}
+                    checked={selected.has(property.id)}
+                    onChange={(event) => {
+                      event.stopPropagation();
+                      toggleSelect(property.id);
+                    }}
+                    onClick={(event) => event.stopPropagation()}
                     className="w-4 h-4 rounded border-gray-300 text-civic-green focus:ring-civic-green flex-shrink-0"
                   />
 
-                  {/* Thumbnail */}
-                  {prop.streetview_available ? (
+                  {property.streetview_available ? (
                     <img
-                      src={`/api/imagery/image/${prop.id}/streetview`}
+                      src={`/api/imagery/image/${property.id}/streetview`}
                       alt=""
                       className="w-20 h-14 object-cover rounded flex-shrink-0 bg-gray-100"
                     />
@@ -258,28 +270,29 @@ export default function ReviewQueue() {
                     </div>
                   )}
 
-                  {/* Property info */}
                   <div className="flex-1 min-w-0">
                     <div className="font-heading text-sm font-semibold text-gray-900 truncate">
-                      {prop.address}
+                      {property.address}
                     </div>
-                    <div className="flex gap-2 mt-1 flex-wrap">
-                      {prop.parcel_id && (
-                        <span className="text-xs text-gray-500">{prop.parcel_id}</span>
+                    <div className="flex gap-2 mt-1 flex-wrap items-center">
+                      {property.parcel_id && (
+                        <span className="text-xs text-gray-500">{property.parcel_id}</span>
                       )}
-                      {prop.buyer_name && (
-                        <span className="text-xs text-gray-500">{prop.buyer_name}</span>
+                      {property.buyer_name && (
+                        <span className="text-xs text-gray-500">{property.buyer_name}</span>
                       )}
-                      {prop.program && (
+                      {property.program && (
                         <span className="text-xs font-medium text-civic-blue bg-civic-blue-pale px-1.5 py-0.5 rounded">
-                          {prop.program}
+                          {property.program}
                         </span>
                       )}
+                      <span className="text-xs font-medium text-gray-700 bg-gray-100 px-1.5 py-0.5 rounded">
+                        Priority {property.priority_score}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Detection badge */}
-                  {detection && prop.detection_label !== "unprocessed" && (
+                  {detection && property.detection_label !== "unprocessed" && (
                     <span
                       className="text-xs font-medium px-2 py-1 rounded flex-shrink-0"
                       style={{ color: detection.color, background: detection.bg }}
@@ -288,7 +301,6 @@ export default function ReviewQueue() {
                     </span>
                   )}
 
-                  {/* Finding badge */}
                   {finding ? (
                     <span
                       className="text-xs font-medium px-2 py-1 rounded flex-shrink-0"
@@ -301,15 +313,13 @@ export default function ReviewQueue() {
                   )}
                 </div>
 
-                {/* Feature 4: Expandable inline preview */}
-                {expandedId === prop.id && (
+                {expandedId === property.id && (
                   <div className="px-4 pb-4 pt-2 border-t border-gray-100 bg-gray-50/50">
                     <div className="flex gap-4">
-                      {/* Imagery */}
                       <div className="flex gap-3 flex-shrink-0">
-                        {prop.streetview_available ? (
+                        {property.streetview_available ? (
                           <img
-                            src={`/api/imagery/image/${prop.id}/streetview`}
+                            src={`/api/imagery/image/${property.id}/streetview`}
                             alt=""
                             className="w-72 h-48 object-cover rounded border border-gray-200"
                           />
@@ -318,54 +328,56 @@ export default function ReviewQueue() {
                             No Street View
                           </div>
                         )}
-                        {prop.satellite_path && (
+                        {property.satellite_path && (
                           <img
-                            src={`/api/imagery/image/${prop.id}/satellite`}
+                            src={`/api/imagery/image/${property.id}/satellite`}
                             alt=""
                             className="w-48 h-48 object-cover rounded border border-gray-200"
                           />
                         )}
                       </div>
-                      {/* Finding buttons */}
+
                       <div className="flex-1 space-y-3">
-                        {detection && prop.detection_label !== "unprocessed" && (
+                        {detection && property.detection_label !== "unprocessed" && (
                           <div className="text-xs" style={{ color: detection.color }}>
-                            Detection: {detection.label} (score: {prop.detection_score})
+                            Detection: {detection.label} (score: {property.detection_score})
                           </div>
                         )}
                         <div className="flex gap-1.5 flex-wrap">
-                          {FINDINGS.map((f, idx) => (
+                          {FINDINGS.map((findingOption, findingIndex) => (
                             <button
-                              key={f.value}
-                              onClick={(e) => { e.stopPropagation(); handleFindingUpdate(prop.id, f.value); }}
+                              key={findingOption.value}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleFindingUpdate(property.id, findingOption.value);
+                              }}
                               className="text-xs font-medium px-2.5 py-1.5 rounded border transition-all"
                               style={{
-                                color: prop.finding === f.value ? "#fff" : f.color,
-                                background: prop.finding === f.value ? f.color : f.bg,
-                                borderColor: f.color + "40",
+                                color: property.finding === findingOption.value ? "#fff" : findingOption.color,
+                                background: property.finding === findingOption.value ? findingOption.color : findingOption.bg,
+                                borderColor: `${findingOption.color}40`,
                               }}
                             >
-                              <span className="opacity-60 mr-0.5">{idx + 1}</span> {f.label}
+                              <span className="opacity-60 mr-0.5">{findingIndex + 1}</span> {findingOption.label}
                             </button>
                           ))}
                         </div>
-                        {/* External links */}
                         <div className="flex gap-2">
                           <a
-                            href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(prop.address + ", Flint, MI")}`}
+                            href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(property.address + ", Flint, MI")}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs text-civic-green hover:underline"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
                           >
                             Interactive Street View
                           </a>
                           <a
-                            href={`https://www.flintpropertyportal.com/search?q=${encodeURIComponent(prop.address)}`}
+                            href={`https://www.flintpropertyportal.com/search?q=${encodeURIComponent(property.address)}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-xs text-civic-blue hover:underline"
-                            onClick={(e) => e.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
                           >
                             Property Portal
                           </a>
@@ -380,11 +392,10 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {/* Feature 2: Pagination controls */}
       {totalCount > PAGE_SIZE && (
         <div className="flex items-center justify-between pt-4 border-t border-gray-100">
           <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
             disabled={page === 0}
             className="text-xs font-medium px-3 py-1.5 rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
@@ -394,7 +405,7 @@ export default function ReviewQueue() {
             Page {page + 1} of {totalPages} ({totalCount} total)
           </span>
           <button
-            onClick={() => setPage(p => p + 1)}
+            onClick={() => setPage((current) => current + 1)}
             disabled={(page + 1) * PAGE_SIZE >= totalCount}
             className="text-xs font-medium px-3 py-1.5 rounded border border-civic-green text-civic-green hover:bg-civic-green-pale disabled:opacity-40 disabled:cursor-not-allowed"
           >
@@ -403,21 +414,18 @@ export default function ReviewQueue() {
         </div>
       )}
 
-      {/* Feature 5: Floating bulk actions bar */}
       {selected.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 bg-white border border-gray-200 shadow-lg rounded-lg px-4 py-3 flex items-center gap-3">
-          <span className="text-xs font-medium text-gray-700">
-            {selected.size} selected
-          </span>
+          <span className="text-xs font-medium text-gray-700">{selected.size} selected</span>
           <div className="flex gap-1.5">
-            {FINDINGS.map(f => (
+            {FINDINGS.map((findingOption) => (
               <button
-                key={f.value}
-                onClick={() => handleBatchUpdate(f.value)}
+                key={findingOption.value}
+                onClick={() => handleBatchUpdate(findingOption.value)}
                 className="text-xs font-medium px-2.5 py-1.5 rounded"
-                style={{ color: f.color, background: f.bg }}
+                style={{ color: findingOption.color, background: findingOption.bg }}
               >
-                {f.label}
+                {findingOption.label}
               </button>
             ))}
           </div>

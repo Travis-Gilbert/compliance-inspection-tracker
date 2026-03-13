@@ -23,6 +23,11 @@ async def init_db():
                 program TEXT DEFAULT '',
                 closing_date TEXT DEFAULT '',
                 commitment TEXT DEFAULT '',
+                email TEXT DEFAULT '',
+                organization TEXT DEFAULT '',
+                purchase_type TEXT DEFAULT '',
+                compliance_1st_attempt TEXT DEFAULT '',
+                compliance_2nd_attempt TEXT DEFAULT '',
 
                 -- Geocoding results
                 latitude REAL,
@@ -34,6 +39,8 @@ async def init_db():
                 streetview_path TEXT DEFAULT '',
                 streetview_date TEXT DEFAULT '',
                 streetview_available INTEGER DEFAULT 0,
+                streetview_historical_path TEXT DEFAULT '',
+                streetview_historical_date TEXT DEFAULT '',
                 satellite_path TEXT DEFAULT '',
                 imagery_fetched_at TEXT,
 
@@ -83,4 +90,22 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_properties_parcel ON properties(parcel_id);
             CREATE INDEX IF NOT EXISTS idx_comms_property ON communications(property_id);
         """)
+
+        # Additive migrations for existing databases (safe to run repeatedly).
+        migration_columns = [
+            ("email", "TEXT DEFAULT ''"),
+            ("organization", "TEXT DEFAULT ''"),
+            ("purchase_type", "TEXT DEFAULT ''"),
+            ("compliance_1st_attempt", "TEXT DEFAULT ''"),
+            ("compliance_2nd_attempt", "TEXT DEFAULT ''"),
+            ("streetview_historical_path", "TEXT DEFAULT ''"),
+            ("streetview_historical_date", "TEXT DEFAULT ''"),
+        ]
+        for col_name, col_type in migration_columns:
+            try:
+                await db.execute(f"ALTER TABLE properties ADD COLUMN {col_name} {col_type}")
+            except Exception:
+                # Existing DBs may already have these columns.
+                pass
+
         await db.commit()

@@ -33,6 +33,7 @@ export const RESOLVED_FINDINGS = [
 export const NAV_ITEMS = [
   { path: "/", label: "Dashboard", icon: "📊" },
   { path: "/review", label: "Review Queue", icon: "📋" },
+  { path: "/map", label: "Compliance Map", icon: "M" },
   { path: "/import", label: "Import", icon: "📥" },
   { path: "/export", label: "Export", icon: "📤" },
 ];

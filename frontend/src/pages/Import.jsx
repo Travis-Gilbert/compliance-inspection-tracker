@@ -29,7 +29,7 @@ export default function Import() {
       <div>
         <h2 className="font-heading text-2xl font-bold text-gray-900">Import Properties</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Upload a CSV exported from FileMaker or Excel. The tool auto-detects columns for address, parcel ID, buyer name, program, closing date, and committed investment.
+          Upload a CSV exported from FileMaker or Excel. The tool auto-detects address and can also map parcel, buyer, program, closing date, commitment, email, organization, purchase type, and compliance outreach dates.
         </p>
       </div>
 
@@ -88,9 +88,9 @@ export default function Import() {
           The tool looks for these columns (names are flexible, order does not matter):
         </p>
         <div className="bg-gray-50 rounded p-3 font-mono text-xs text-gray-700 overflow-auto">
-          address, parcel_id, buyer_name, program, closing_date, commitment<br/>
-          307 Mason St, 41-06-538-004, John Smith, Featured Homes, 2024-03-15, $45000<br/>
-          1234 Oak Ave, 41-08-123-005, Jane Doe, Ready for Rehab, 2023-11-20, $80000
+          address, parcel_id, buyer_name, email, organization, purchase_type, program, closing_date, commitment, compliance_1st_attempt, compliance_2nd_attempt<br/>
+          307 Mason St, 41-06-538-004, John Smith, john@example.org, Mason Dev LLC, Individual, Featured Homes, 2024-03-15, $45000, 2025-10-01, 2025-11-01<br/>
+          1234 Oak Ave, 41-08-123-005, Jane Doe, jane@example.org, Oak Homes Inc, LLC, Ready for Rehab, 2023-11-20, $80000, , 
         </div>
         <p className="text-xs text-gray-500 mt-2">
           At minimum, each row needs an address. All other columns are optional.

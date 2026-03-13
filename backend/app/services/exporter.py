@@ -33,9 +33,14 @@ def export_properties_csv(properties: list[dict], include_detection: bool = True
         "Address",
         "Parcel ID",
         "Buyer Name",
+        "Email",
+        "Organization",
+        "Purchase Type",
         "Program",
         "Closing Date",
         "Commitment",
+        "Compliance 1st Attempt",
+        "Compliance 2nd Attempt",
         "Finding",
         "Notes",
         "Reviewed Date",
@@ -46,6 +51,8 @@ def export_properties_csv(properties: list[dict], include_detection: bool = True
             "Detection Score",
             "Street View Available",
             "Street View Date",
+            "Street View Historical Date",
+            "Street View Historical Path",
         ])
 
     writer.writerow(headers)
@@ -55,9 +62,14 @@ def export_properties_csv(properties: list[dict], include_detection: bool = True
             prop.get("address", ""),
             prop.get("parcel_id", ""),
             prop.get("buyer_name", ""),
+            prop.get("email", ""),
+            prop.get("organization", ""),
+            prop.get("purchase_type", ""),
             prop.get("program", ""),
             prop.get("closing_date", ""),
             prop.get("commitment", ""),
+            prop.get("compliance_1st_attempt", ""),
+            prop.get("compliance_2nd_attempt", ""),
             FINDING_LABELS.get(prop.get("finding", ""), ""),
             prop.get("notes", "").replace("\n", " "),
             prop.get("reviewed_at", ""),
@@ -68,6 +80,8 @@ def export_properties_csv(properties: list[dict], include_detection: bool = True
                 prop.get("detection_score", ""),
                 "Yes" if prop.get("streetview_available") else "No",
                 prop.get("streetview_date", ""),
+                prop.get("streetview_historical_date", ""),
+                prop.get("streetview_historical_path", ""),
             ])
 
         writer.writerow(row)

@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -7,7 +6,12 @@ import aiosqlite
 
 from app.models.database import get_db
 from app.services.geocoder import geocode_address, batch_geocode
-from app.services.imagery import fetch_imagery_for_property, batch_fetch_imagery
+from app.services.imagery import (
+    fetch_imagery_for_property,
+    batch_fetch_imagery,
+    fetch_historical_streetview,
+)
+from app.services.enrichment import parse_closing_date
 from app.config import GOOGLE_MAPS_API_KEY
 
 router = APIRouter(prefix="/api/imagery", tags=["imagery"])
@@ -150,13 +154,72 @@ async def fetch_batch_imagery(
     return {"fetched": fetched, "total_attempted": len(rows)}
 
 
+@router.post("/fetch-historical/{property_id}")
+async def fetch_historical_imagery(property_id: int, db: aiosqlite.Connection = Depends(get_db)):
+    """
+    Fetch and cache historical Street View imagery using the closing date.
+    """
+    cursor = await db.execute(
+        """
+        SELECT address, latitude, longitude, closing_date,
+               streetview_historical_path, streetview_historical_date
+        FROM properties WHERE id = ?
+        """,
+        [property_id],
+    )
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Property not found")
+    if row["latitude"] is None or row["longitude"] is None:
+        raise HTTPException(status_code=422, detail="Property not geocoded yet")
+
+    parsed = parse_closing_date(row["closing_date"] or "")
+    if not parsed:
+        raise HTTPException(status_code=422, detail="No usable closing date available")
+    target_date = parsed.strftime("%Y-%m")
+
+    path, available, actual_date = await fetch_historical_streetview(
+        lat=row["latitude"],
+        lng=row["longitude"],
+        address=row["address"],
+        target_date=target_date,
+    )
+
+    if available:
+        await db.execute(
+            """
+            UPDATE properties
+            SET streetview_historical_path = ?, streetview_historical_date = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            [path, actual_date, datetime.now().isoformat(), property_id],
+        )
+        await db.commit()
+
+    return {
+        "property_id": property_id,
+        "historical_available": available,
+        "target_date": target_date,
+        "actual_date": actual_date,
+        "streetview_historical_path": path,
+    }
+
+
 @router.get("/image/{property_id}/{image_type}")
 async def get_image(property_id: int, image_type: str, db: aiosqlite.Connection = Depends(get_db)):
-    """Serve a cached image file. image_type: streetview or satellite."""
-    if image_type not in ("streetview", "satellite"):
-        raise HTTPException(status_code=400, detail="image_type must be 'streetview' or 'satellite'")
+    """Serve a cached image file."""
+    image_column_map = {
+        "streetview": "streetview_path",
+        "satellite": "satellite_path",
+        "streetview_historical": "streetview_historical_path",
+    }
+    column = image_column_map.get(image_type)
+    if not column:
+        raise HTTPException(
+            status_code=400,
+            detail="image_type must be one of: streetview, satellite, streetview_historical",
+        )
 
-    column = f"{image_type}_path"
     cursor = await db.execute(f"SELECT {column} FROM properties WHERE id = ?", [property_id])
     row = await cursor.fetchone()
 

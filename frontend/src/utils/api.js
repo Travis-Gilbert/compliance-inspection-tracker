@@ -18,6 +18,26 @@ export const getProperties = (params = {}) => {
   return request(`/api/properties/?${qs}`).then(r => r.json());
 };
 
+export const getPriorityQueue = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/properties/priority-queue?${qs}`).then(r => r.json());
+};
+
+export const getMapProperties = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/properties/map/all?${qs}`).then(r => r.json());
+};
+
+export const getBuyerSummary = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/properties/buyers/summary?${qs}`).then(r => r.json());
+};
+
+export const getPropertyClusters = (params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/properties/clusters?${qs}`).then(r => r.json());
+};
+
 export const getProperty = (id) =>
   request(`/api/properties/${id}`).then(r => r.json());
 
@@ -71,6 +91,9 @@ export const geocodeBatch = (limit = 50) =>
 export const fetchImageryBatch = (limit = 25) =>
   request(`/api/imagery/fetch-batch?limit=${limit}`, { method: "POST" }).then(r => r.json());
 
+export const fetchHistoricalImagery = (propertyId) =>
+  request(`/api/imagery/fetch-historical/${propertyId}`, { method: "POST" }).then(r => r.json());
+
 export const getImageUrl = (propertyId, type) =>
   `/api/imagery/image/${propertyId}/${type}`;
 
@@ -82,14 +105,23 @@ export const getDetectionSummary = () =>
   request("/api/detection/summary").then(r => r.json());
 
 // Pipeline (one-button processing)
-export const runPipeline = (limit = 25) =>
-  request(`/api/pipeline/process?limit=${limit}`, { method: "POST" }).then(r => r.json());
+export const runPipeline = ({ limit = 25, processAll = false } = {}) => {
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    process_all: processAll ? "true" : "false",
+  }).toString();
+  return request(`/api/pipeline/process?${qs}`, { method: "POST" }).then(r => r.json());
+};
 
 // Pipeline with SSE progress streaming
-export const runPipelineStream = (limit = 25, onEvent) => {
+export const runPipelineStream = (limit = 25, onEvent, { processAll = false } = {}) => {
   const controller = new AbortController();
+  const qs = new URLSearchParams({
+    limit: String(limit),
+    process_all: processAll ? "true" : "false",
+  }).toString();
   const run = async () => {
-    const res = await fetch(`/api/pipeline/process-stream?limit=${limit}`, {
+    const res = await fetch(`/api/pipeline/process-stream?${qs}`, {
       method: "POST",
       signal: controller.signal,
     });

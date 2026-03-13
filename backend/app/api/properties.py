@@ -13,6 +13,12 @@ from app.services.csv_parser import parse_csv_text
 from app.services.exporter import (
     export_properties_csv, export_inspection_list_csv, generate_summary_report,
 )
+from app.services.enrichment import (
+    apply_priority_scores,
+    filter_by_contact,
+    haversine_clusters,
+    summarize_buyers,
+)
 
 router = APIRouter(prefix="/api/properties", tags=["properties"])
 
@@ -55,8 +61,8 @@ async def list_properties(
     elif reviewed is False:
         conditions.append("(finding = '' OR finding IS NULL)")
     if search:
-        conditions.append("(address LIKE ? OR parcel_id LIKE ? OR buyer_name LIKE ?)")
-        params.extend([f"%{search}%"] * 3)
+        conditions.append("(address LIKE ? OR parcel_id LIKE ? OR buyer_name LIKE ? OR organization LIKE ? OR email LIKE ?)")
+        params.extend([f"%{search}%"] * 5)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     allowed_sorts = ["created_at", "address", "detection_score", "reviewed_at", "program"]
@@ -84,6 +90,194 @@ async def list_properties(
     return {"properties": [dict(row) for row in rows], "total": total, "limit": limit, "offset": offset}
 
 
+# --- Leadership & Enrichment ---
+
+@router.get("/map/all")
+async def get_map_properties(
+    program: str = Query(None),
+    contact: str = Query("all"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    Return all geocoded properties with server-computed compliance priority.
+    """
+    conditions = ["latitude IS NOT NULL", "longitude IS NOT NULL"]
+    params = []
+
+    if program:
+        conditions.append("program = ?")
+        params.append(program)
+
+    where = f"WHERE {' AND '.join(conditions)}"
+    cursor = await db.execute(
+        f"""
+        SELECT id, address, parcel_id, buyer_name, program, closing_date, commitment,
+               email, organization, purchase_type,
+               compliance_1st_attempt, compliance_2nd_attempt,
+               latitude, longitude, formatted_address,
+               streetview_path, streetview_available, streetview_date,
+               streetview_historical_path, streetview_historical_date,
+               satellite_path, imagery_fetched_at,
+               detection_label, detection_score,
+               finding, notes, reviewed_at
+        FROM properties
+        {where}
+        ORDER BY address ASC
+        """,
+        params,
+    )
+    rows = [dict(row) for row in await cursor.fetchall()]
+    prioritized = apply_priority_scores(rows)
+    prioritized = filter_by_contact(prioritized, contact)
+    prioritized.sort(key=lambda row: (-float(row.get("priority_score", 0.0)), row.get("address", "")))
+    return {"count": len(prioritized), "properties": prioritized}
+
+
+@router.get("/buyers/summary")
+async def get_buyers_summary(
+    program: str = Query(None),
+    contact: str = Query("all"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    Return buyer portfolio rollups for leadership reporting.
+    """
+    conditions = []
+    params = []
+    if program:
+        conditions.append("program = ?")
+        params.append(program)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    cursor = await db.execute(
+        f"""
+        SELECT id, address, parcel_id, buyer_name, program, closing_date,
+               organization, compliance_1st_attempt, compliance_2nd_attempt,
+               latitude, longitude, finding, detection_label, detection_score,
+               streetview_available, satellite_path
+        FROM properties
+        {where}
+        """,
+        params,
+    )
+    rows = [dict(row) for row in await cursor.fetchall()]
+    prioritized = apply_priority_scores(rows)
+    prioritized = filter_by_contact(prioritized, contact)
+    buyers = summarize_buyers(prioritized)
+    return {"count": len(buyers), "buyers": buyers}
+
+
+@router.get("/clusters")
+async def get_property_clusters(
+    program: str = Query(None),
+    contact: str = Query("all"),
+    radius_miles: float = Query(0.35, ge=0.05, le=5.0),
+    min_points: int = Query(2, ge=2, le=100),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    Return Haversine clusters for geocoded properties.
+    """
+    conditions = ["latitude IS NOT NULL", "longitude IS NOT NULL"]
+    params = []
+    if program:
+        conditions.append("program = ?")
+        params.append(program)
+
+    where = f"WHERE {' AND '.join(conditions)}"
+    cursor = await db.execute(
+        f"""
+        SELECT id, address, program, buyer_name, closing_date,
+               compliance_1st_attempt, compliance_2nd_attempt,
+               latitude, longitude, finding, detection_label, detection_score,
+               streetview_available, satellite_path
+        FROM properties
+        {where}
+        """,
+        params,
+    )
+    rows = [dict(row) for row in await cursor.fetchall()]
+    prioritized = apply_priority_scores(rows)
+    prioritized = filter_by_contact(prioritized, contact)
+    clusters = haversine_clusters(prioritized, radius_miles=radius_miles, min_points=min_points)
+    return {"count": len(clusters), "clusters": clusters}
+
+
+@router.get("/priority-queue")
+async def get_priority_queue(
+    filter: str = Query("all"),
+    program: str = Query(None),
+    search: str = Query(None),
+    sort: str = Query("priority"),
+    order: str = Query("desc"),
+    limit: int = Query(50, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    Return properties sorted by composite compliance priority.
+    """
+    conditions = []
+    params = []
+
+    if filter == "unreviewed":
+        conditions.append("(finding = '' OR finding IS NULL)")
+    elif filter == "inconclusive":
+        conditions.append("finding = 'inconclusive'")
+    elif filter == "resolved":
+        resolved_values = ", ".join(f"'{f.value}'" for f in RESOLVED_FINDINGS)
+        conditions.append(f"finding IN ({resolved_values})")
+    elif filter == "reviewed":
+        conditions.append("(finding != '' AND finding IS NOT NULL)")
+
+    if program:
+        conditions.append("program = ?")
+        params.append(program)
+
+    if search:
+        conditions.append("(address LIKE ? OR parcel_id LIKE ? OR buyer_name LIKE ? OR organization LIKE ? OR email LIKE ?)")
+        params.extend([f"%{search}%"] * 5)
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    cursor = await db.execute(
+        f"""
+        SELECT p.*, COALESCE(
+            (SELECT COUNT(*) FROM communications c WHERE c.property_id = p.id), 0
+        ) AS communication_count
+        FROM properties p
+        {where}
+        """,
+        params,
+    )
+    rows = [dict(row) for row in await cursor.fetchall()]
+    prioritized = apply_priority_scores(rows)
+    sort_key = sort.lower()
+    descending = order.lower() != "asc"
+    if sort_key == "address":
+        prioritized.sort(key=lambda row: row.get("address", "").lower(), reverse=descending)
+    elif sort_key == "created_at":
+        prioritized.sort(key=lambda row: row.get("created_at", ""), reverse=descending)
+    elif sort_key == "detection_score":
+        prioritized.sort(key=lambda row: float(row.get("detection_score") or 0.0), reverse=descending)
+    else:
+        prioritized.sort(
+            key=lambda row: (
+                float(row.get("priority_score", 0.0)),
+                float(row.get("detection_score") or 0.0),
+                row.get("address", ""),
+            ),
+            reverse=True,
+        )
+
+    total = len(prioritized)
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "properties": prioritized[offset:offset + limit],
+    }
+
+
 # --- Single Property ---
 
 @router.get("/{property_id}", response_model=PropertyResponse)
@@ -103,9 +297,27 @@ async def get_property(property_id: int, db: aiosqlite.Connection = Depends(get_
 @router.post("/", response_model=PropertyResponse)
 async def create_property(prop: PropertyCreate, db: aiosqlite.Connection = Depends(get_db)):
     cursor = await db.execute("""
-        INSERT INTO properties (address, parcel_id, buyer_name, program, closing_date, commitment)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, [prop.address, prop.parcel_id, prop.buyer_name, prop.program, prop.closing_date, prop.commitment])
+        INSERT INTO properties (
+            address, parcel_id, buyer_name, program, closing_date, commitment,
+            email, organization, purchase_type, compliance_1st_attempt, compliance_2nd_attempt,
+            streetview_historical_path, streetview_historical_date
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, [
+        prop.address,
+        prop.parcel_id,
+        prop.buyer_name,
+        prop.program,
+        prop.closing_date,
+        prop.commitment,
+        prop.email,
+        prop.organization,
+        prop.purchase_type,
+        prop.compliance_1st_attempt,
+        prop.compliance_2nd_attempt,
+        prop.streetview_historical_path,
+        prop.streetview_historical_date,
+    ])
     await db.commit()
 
     return await get_property(cursor.lastrowid, db)
@@ -222,10 +434,28 @@ async def import_csv(
     for prop in properties:
         try:
             await db.execute("""
-                INSERT INTO properties (address, parcel_id, buyer_name, program, closing_date, commitment, import_batch)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, [prop.address, prop.parcel_id, prop.buyer_name, prop.program,
-                  prop.closing_date, prop.commitment, batch_id])
+                INSERT INTO properties (
+                    address, parcel_id, buyer_name, program, closing_date, commitment,
+                    email, organization, purchase_type, compliance_1st_attempt, compliance_2nd_attempt,
+                    streetview_historical_path, streetview_historical_date, import_batch
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                prop.address,
+                prop.parcel_id,
+                prop.buyer_name,
+                prop.program,
+                prop.closing_date,
+                prop.commitment,
+                prop.email,
+                prop.organization,
+                prop.purchase_type,
+                prop.compliance_1st_attempt,
+                prop.compliance_2nd_attempt,
+                prop.streetview_historical_path,
+                prop.streetview_historical_date,
+                batch_id,
+            ])
             imported += 1
         except Exception as e:
             errors.append(f"Insert error for {prop.address}: {str(e)}")
@@ -310,6 +540,9 @@ async def get_stats(db: aiosqlite.Connection = Depends(get_db)):
 async def export_csv(
     finding: str = Query(None),
     detection: str = Query(None),
+    program: str = Query(None),
+    contact: str = Query("all"),
+    search: str = Query(None),
     db: aiosqlite.Connection = Depends(get_db),
 ):
     """Export properties to CSV."""
@@ -321,6 +554,16 @@ async def export_csv(
     if detection:
         conditions.append("detection_label = ?")
         params.append(detection)
+    if program:
+        conditions.append("program = ?")
+        params.append(program)
+    if contact == "contacted":
+        conditions.append("(COALESCE(compliance_1st_attempt, '') != '' OR COALESCE(compliance_2nd_attempt, '') != '')")
+    elif contact == "no_contact":
+        conditions.append("(COALESCE(compliance_1st_attempt, '') = '' AND COALESCE(compliance_2nd_attempt, '') = '')")
+    if search:
+        conditions.append("(address LIKE ? OR parcel_id LIKE ? OR buyer_name LIKE ? OR organization LIKE ? OR email LIKE ?)")
+        params.extend([f"%{search}%"] * 5)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     cursor = await db.execute(f"SELECT * FROM properties {where} ORDER BY address", params)

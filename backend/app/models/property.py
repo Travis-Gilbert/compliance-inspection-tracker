@@ -44,6 +44,13 @@ class PropertyCreate(BaseModel):
     program: str = ""
     closing_date: str = ""
     commitment: str = ""
+    email: str = ""
+    organization: str = ""
+    purchase_type: str = ""
+    compliance_1st_attempt: str = ""
+    compliance_2nd_attempt: str = ""
+    streetview_historical_path: str = ""
+    streetview_historical_date: str = ""
 
 
 class PropertyUpdate(BaseModel):
@@ -55,6 +62,13 @@ class PropertyUpdate(BaseModel):
     program: Optional[str] = None
     closing_date: Optional[str] = None
     commitment: Optional[str] = None
+    email: Optional[str] = None
+    organization: Optional[str] = None
+    purchase_type: Optional[str] = None
+    compliance_1st_attempt: Optional[str] = None
+    compliance_2nd_attempt: Optional[str] = None
+    streetview_historical_path: Optional[str] = None
+    streetview_historical_date: Optional[str] = None
 
 
 class PropertyResponse(BaseModel):
@@ -65,6 +79,11 @@ class PropertyResponse(BaseModel):
     program: str
     closing_date: str
     commitment: str
+    email: str = ""
+    organization: str = ""
+    purchase_type: str = ""
+    compliance_1st_attempt: str = ""
+    compliance_2nd_attempt: str = ""
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     formatted_address: str = ""
@@ -72,6 +91,8 @@ class PropertyResponse(BaseModel):
     streetview_path: str = ""
     streetview_date: str = ""
     streetview_available: bool = False
+    streetview_historical_path: str = ""
+    streetview_historical_date: str = ""
     satellite_path: str = ""
     imagery_fetched_at: Optional[str] = None
     detection_score: Optional[float] = None

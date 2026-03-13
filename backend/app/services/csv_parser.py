@@ -34,6 +34,40 @@ COLUMN_PATTERNS = {
         "exact": ["commitment", "investment", "committed", "rehab_cost", "committed_investment"],
         "contains": ["commitment", "invest", "rehab_cost"],
     },
+    "email": {
+        "exact": ["email", "email_address", "e-mail", "e_mail"],
+        "contains": ["email", "e-mail"],
+    },
+    "organization": {
+        "exact": ["organization", "org", "company", "entity", "org_name"],
+        "contains": ["organization", "company"],
+    },
+    "purchase_type": {
+        "exact": ["purchase_type", "purchaser_type", "buyer_type", "type"],
+        "contains": ["purchase_type", "buyer_type", "purchaser_type"],
+    },
+    "compliance_1st_attempt": {
+        "exact": [
+            "compliance_1st_attempt", "first_attempt", "1st_attempt",
+            "compliance_first_attempt", "compliance_attempt_1",
+        ],
+        "contains": ["1st_attempt", "first_attempt", "compliance_1", "attempt_1"],
+    },
+    "compliance_2nd_attempt": {
+        "exact": [
+            "compliance_2nd_attempt", "second_attempt", "2nd_attempt",
+            "compliance_second_attempt", "compliance_attempt_2",
+        ],
+        "contains": ["2nd_attempt", "second_attempt", "compliance_2", "attempt_2"],
+    },
+    "streetview_historical_path": {
+        "exact": ["streetview_historical_path", "historical_streetview_path"],
+        "contains": ["streetview_historical_path", "historical_streetview_path"],
+    },
+    "streetview_historical_date": {
+        "exact": ["streetview_historical_date", "historical_streetview_date"],
+        "contains": ["streetview_historical_date", "historical_streetview_date"],
+    },
 }
 
 PARCEL_PATTERN = re.compile(r"\d{2}-\d{2}-\d{3}-\d{3}")
@@ -178,6 +212,13 @@ def parse_csv_text(text: str, filename: str = "") -> tuple[list[PropertyCreate],
                 program=get_col("program"),
                 closing_date=get_col("closing_date"),
                 commitment=get_col("commitment"),
+                email=get_col("email"),
+                organization=get_col("organization"),
+                purchase_type=get_col("purchase_type"),
+                compliance_1st_attempt=get_col("compliance_1st_attempt"),
+                compliance_2nd_attempt=get_col("compliance_2nd_attempt"),
+                streetview_historical_path=get_col("streetview_historical_path"),
+                streetview_historical_date=get_col("streetview_historical_date"),
             )
             properties.append(prop)
 

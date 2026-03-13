@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { getStats, getImageryStatus, runPipelineStream, runPipelineAll } from "../utils/api";
+import { getStats, getImageryStatus, runPipelineStream } from "../utils/api";
 import { FINDINGS, DETECTION_LABELS } from "../utils/constants";
 import { DashboardSkeleton } from "../components/LoadingSkeleton";
 
@@ -60,9 +60,10 @@ function PipelineProgress({ events }) {
 
         const isDone = state.status === "done";
         const isProgress = state.status === "progress" || state.status === "batch_complete";
+        const total = state.total ?? state.attempted ?? 0;
         const pct = isProgress && state.total > 0
           ? Math.round((state.current / state.total) * 100)
-          : isDone ? 100 : 0;
+          : isDone && total > 0 ? 100 : 0;
 
         return (
           <div key={step} className="flex items-center gap-3">
@@ -82,10 +83,10 @@ function PipelineProgress({ events }) {
                 </span>
                 <span className="text-xs text-gray-500">
                   {isDone
-                    ? `${state.processed}/${state.total} done`
+                    ? `${state.processed || 0}/${total} done`
                     : isProgress
                       ? `${state.current}/${state.total}`
-                      : `0/${state.total}`
+                      : `0/${total}`
                   }
                 </span>
               </div>
@@ -112,6 +113,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [apiStatus, setApiStatus] = useState(null);
   const [processing, setProcessing] = useState(false);
+  const [processingMode, setProcessingMode] = useState("batch");
   const [pipelineEvents, setPipelineEvents] = useState([]);
   const cancelRef = useRef(null);
 
@@ -127,34 +129,18 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(); }, []);
 
-  const handleProcess = async () => {
+  const handleProcess = async ({ processAll = false } = {}) => {
     setProcessing(true);
+    setProcessingMode(processAll ? "all" : "batch");
     setPipelineEvents([]);
 
-    const { promise, cancel } = runPipelineStream(25, (event) => {
-      setPipelineEvents(prev => [...prev, event]);
-    });
-    cancelRef.current = cancel;
-
-    try {
-      await promise;
-      await loadData();
-    } catch (e) {
-      if (e.name !== "AbortError") {
-        setPipelineEvents(prev => [...prev, { step: "error", message: e.message }]);
-      }
-    }
-    setProcessing(false);
-    cancelRef.current = null;
-  };
-
-  const handleProcessAll = async () => {
-    setProcessing(true);
-    setPipelineEvents([]);
-
-    const { promise, cancel } = runPipelineAll(100, (event) => {
-      setPipelineEvents(prev => [...prev, event]);
-    });
+    const { promise, cancel } = runPipelineStream(
+      25,
+      (event) => {
+        setPipelineEvents((prev) => [...prev, event]);
+      },
+      { processAll }
+    );
     cancelRef.current = cancel;
 
     try {
@@ -230,7 +216,7 @@ export default function Dashboard() {
         </p>
         <div className="flex items-center gap-3 flex-wrap">
           <button
-            onClick={handleProcess}
+            onClick={() => handleProcess({ processAll: false })}
             disabled={processing || stats.total === 0}
             className={`px-5 py-2 rounded-md text-sm font-medium transition-colors ${
               processing || stats.total === 0
@@ -238,19 +224,19 @@ export default function Dashboard() {
                 : "bg-civic-green text-white hover:bg-civic-green-light"
             }`}
           >
-            {processing ? "Processing..." : "Run Pipeline (next 25)"}
+            {processing && processingMode === "batch" ? "Processing..." : "Run Next Batch"}
           </button>
 
           <button
-            onClick={handleProcessAll}
+            onClick={() => handleProcess({ processAll: true })}
             disabled={processing || stats.total === 0}
             className={`px-5 py-2 rounded-md text-sm font-medium transition-colors ${
               processing || stats.total === 0
                 ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                : "bg-civic-blue text-white hover:bg-blue-700"
+                : "bg-civic-blue text-white hover:bg-civic-blue-light"
             }`}
           >
-            {processing ? "Processing..." : "Process All Remaining"}
+            {processing && processingMode === "all" ? "Processing..." : "Process All Remaining"}
           </button>
 
           {processing && (

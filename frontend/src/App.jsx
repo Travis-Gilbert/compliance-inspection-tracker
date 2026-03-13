@@ -6,6 +6,7 @@ import ReviewQueue from "./pages/ReviewQueue";
 import PropertyDetail from "./pages/PropertyDetail";
 import Import from "./pages/Import";
 import Export from "./pages/Export";
+import LeadershipMap from "./pages/LeadershipMap";
 
 function PageBoundary({ children }) {
   return <ErrorBoundary>{children}</ErrorBoundary>;
@@ -13,14 +14,15 @@ function PageBoundary({ children }) {
 
 export default function App() {
   return (
-    <Layout>
-      <Routes>
+    <Routes>
+      <Route path="/map" element={<PageBoundary><LeadershipMap /></PageBoundary>} />
+      <Route element={<Layout />}>
         <Route path="/" element={<PageBoundary><Dashboard /></PageBoundary>} />
         <Route path="/review" element={<PageBoundary><ReviewQueue /></PageBoundary>} />
         <Route path="/property/:id" element={<PageBoundary><PropertyDetail /></PageBoundary>} />
         <Route path="/import" element={<PageBoundary><Import /></PageBoundary>} />
         <Route path="/export" element={<PageBoundary><Export /></PageBoundary>} />
-      </Routes>
-    </Layout>
+      </Route>
+    </Routes>
   );
 }

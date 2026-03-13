@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Identity
 
@@ -234,7 +234,7 @@ Fictional entries using real Flint street patterns and Genesee County parcel ID 
 
 ## MCP Plugin
 
-A Claude Code plugin exists at `../compliance-tracker-plugin/` that wraps the FastAPI backend as MCP tools. It provides:
+A Codex plugin exists at `../compliance-tracker-plugin/` that wraps the FastAPI backend as MCP tools. It provides:
 - 9 MCP tools (search, get_property, update_finding, batch_update, get_stats, review_queue, import_csv, export_csv, run_pipeline)
 - A compliance-review skill with institutional knowledge
 - A read-only triage agent for batch recommendations
@@ -243,9 +243,9 @@ A Claude Code plugin exists at `../compliance-tracker-plugin/` that wraps the Fa
 The plugin proxies through the FastAPI backend (requires it to be running). See the plugin's own README for setup.
 
 ### Plugin deployment details
-- **Installed at:** `~/.claude/plugins/marketplaces/local-desktop-app-uploads/compliance-tracker/`
-- **Registered in:** `~/.claude/plugins/installed_plugins.json` as `compliance-tracker@local-desktop-app-uploads`
+- **Installed at:** `~/.Codex/plugins/marketplaces/local-desktop-app-uploads/compliance-tracker/`
+- **Registered in:** `~/.Codex/plugins/installed_plugins.json` as `compliance-tracker@local-desktop-app-uploads`
 - **MCP server deps** (`fastmcp`, `httpx`, `pydantic`) must be installed in global Python, not the backend virtualenv: `pip3 install fastmcp httpx pydantic`
 - **GitHub (private):** `Travis-Gilbert/compliance-inspection-tracker`
 - **Plugin repo (private):** `Travis-Gilbert/compliance-tracker-plugin`
-- After editing plugin files, copy changes to the install path: `cp -R ../compliance-tracker-plugin/ ~/.claude/plugins/marketplaces/local-desktop-app-uploads/compliance-tracker/`
+- After editing plugin files, copy changes to the install path: `cp -R ../compliance-tracker-plugin/ ~/.Codex/plugins/marketplaces/local-desktop-app-uploads/compliance-tracker/`

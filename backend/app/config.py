@@ -26,6 +26,12 @@ IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 VACANCY_THRESHOLD = float(os.getenv("VACANCY_THRESHOLD", "0.6"))
 DEMOLITION_THRESHOLD = float(os.getenv("DEMOLITION_THRESHOLD", "0.7"))
 
+# Pipeline concurrency and batching
+GEOCODE_CONCURRENCY = int(os.getenv("GEOCODE_CONCURRENCY", "8"))
+IMAGERY_CONCURRENCY = int(os.getenv("IMAGERY_CONCURRENCY", "6"))
+DETECTION_WORKERS = int(os.getenv("DETECTION_WORKERS", "4"))
+PIPELINE_BATCH_SIZE = int(os.getenv("PIPELINE_BATCH_SIZE", "100"))
+
 # Server
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))

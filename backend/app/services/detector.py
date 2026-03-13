@@ -18,11 +18,15 @@ This is heuristic-based. For higher accuracy, swap in a trained model
 """
 
 import json
+import os
+import asyncio
 import numpy as np
 from pathlib import Path
 from PIL import Image
 from typing import Optional
-from app.config import VACANCY_THRESHOLD, DEMOLITION_THRESHOLD
+from concurrent.futures import ProcessPoolExecutor
+
+from app.config import VACANCY_THRESHOLD, DEMOLITION_THRESHOLD, DETECTION_WORKERS
 
 
 class DetectionResult:
@@ -250,17 +254,44 @@ def detect_property_condition(
 
 async def batch_detect(
     properties: list[dict],
+    workers: int = DETECTION_WORKERS,
+    on_result=None,
 ) -> dict[int, DetectionResult]:
     """
     Run detection on multiple properties.
     Each dict should have: id, streetview_path, satellite_path.
-    This is CPU-bound, so we run it sequentially (could use ProcessPoolExecutor for large batches).
+    Uses process-based parallelism for CPU-bound analysis.
     """
+    if not properties:
+        return {}
+
+    worker_count = max(1, min(workers, len(properties), os.cpu_count() or 1))
+    loop = asyncio.get_running_loop()
     results = {}
-    for prop in properties:
-        result = detect_property_condition(
-            streetview_path=prop.get("streetview_path"),
-            satellite_path=prop.get("satellite_path"),
-        )
-        results[prop["id"]] = result
+    with ProcessPoolExecutor(max_workers=worker_count) as pool:
+        tasks = [
+            loop.run_in_executor(pool, detect_property_condition_worker, prop)
+            for prop in properties
+        ]
+        total = len(tasks)
+        for current, task in enumerate(asyncio.as_completed(tasks), start=1):
+            prop_id, score, label, details = await task
+            result = DetectionResult(score=score, label=label, details=details)
+            results[prop_id] = result
+            if on_result:
+                maybe_coro = on_result(prop_id, result, current, total)
+                if asyncio.iscoroutine(maybe_coro):
+                    await maybe_coro
+
     return results
+
+
+def detect_property_condition_worker(prop: dict) -> tuple[int, float, str, dict]:
+    """
+    Process-safe worker wrapper (top-level for macOS spawn compatibility).
+    """
+    result = detect_property_condition(
+        streetview_path=prop.get("streetview_path"),
+        satellite_path=prop.get("satellite_path"),
+    )
+    return prop["id"], result.score, result.label, result.details

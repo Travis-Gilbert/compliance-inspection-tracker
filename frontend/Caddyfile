@@ -1,4 +1,8 @@
-:{$PORT} {
+{
+	auto_https off
+}
+
+http://0.0.0.0:{$PORT} {
 	root * /srv
 	encode zstd gzip
 	try_files {path} /index.html

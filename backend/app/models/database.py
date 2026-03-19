@@ -43,6 +43,7 @@ SQLITE_SCHEMA_STATEMENTS = [
         streetview_available INTEGER DEFAULT 0,
         streetview_historical_path TEXT DEFAULT '',
         streetview_historical_date TEXT DEFAULT '',
+        historical_imagery_checked_at TEXT,
         satellite_path TEXT DEFAULT '',
         imagery_fetched_at TEXT,
 
@@ -119,6 +120,7 @@ POSTGRES_SCHEMA_STATEMENTS = [
         streetview_available INTEGER DEFAULT 0,
         streetview_historical_path TEXT DEFAULT '',
         streetview_historical_date TEXT DEFAULT '',
+        historical_imagery_checked_at TEXT,
         satellite_path TEXT DEFAULT '',
         imagery_fetched_at TEXT,
 
@@ -175,6 +177,7 @@ MIGRATION_COLUMNS = [
     ("compliance_2nd_attempt", "TEXT DEFAULT ''"),
     ("streetview_historical_path", "TEXT DEFAULT ''"),
     ("streetview_historical_date", "TEXT DEFAULT ''"),
+    ("historical_imagery_checked_at", "TEXT"),
     ("address_key", "TEXT DEFAULT ''"),
 ]
 
@@ -365,6 +368,7 @@ def _merge_property_rows(primary: dict, duplicates: list[dict]) -> dict:
             "streetview_date",
             "streetview_historical_path",
             "streetview_historical_date",
+            "historical_imagery_checked_at",
             "satellite_path",
             "imagery_fetched_at",
             "detection_score",
@@ -432,9 +436,10 @@ async def _dedupe_properties(db: DatabaseConnection):
                 compliance_1st_attempt = ?, compliance_2nd_attempt = ?, latitude = ?, longitude = ?,
                 formatted_address = ?, geocoded_at = ?, streetview_path = ?, streetview_date = ?,
                 streetview_available = ?, streetview_historical_path = ?, streetview_historical_date = ?,
-                satellite_path = ?, imagery_fetched_at = ?, detection_score = ?, detection_label = ?,
-                detection_details = ?, detection_ran_at = ?, finding = ?, notes = ?, reviewed_at = ?,
-                reviewed_by = ?, import_batch = ?, created_at = ?, updated_at = ?
+                historical_imagery_checked_at = ?, satellite_path = ?, imagery_fetched_at = ?,
+                detection_score = ?, detection_label = ?, detection_details = ?, detection_ran_at = ?,
+                finding = ?, notes = ?, reviewed_at = ?, reviewed_by = ?, import_batch = ?,
+                created_at = ?, updated_at = ?
             WHERE id = ?
             """,
             [
@@ -459,6 +464,7 @@ async def _dedupe_properties(db: DatabaseConnection):
                 1 if merged.get("streetview_available") else 0,
                 merged.get("streetview_historical_path", ""),
                 merged.get("streetview_historical_date", ""),
+                merged.get("historical_imagery_checked_at"),
                 merged.get("satellite_path", ""),
                 merged.get("imagery_fetched_at"),
                 merged.get("detection_score"),

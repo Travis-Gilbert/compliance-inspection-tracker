@@ -37,6 +37,7 @@ PROPERTIES_COLUMNS = [
     "streetview_available",
     "streetview_historical_path",
     "streetview_historical_date",
+    "historical_imagery_checked_at",
     "satellite_path",
     "imagery_fetched_at",
     "detection_score",
@@ -78,7 +79,15 @@ IMPORT_BATCH_COLUMNS = [
 def read_sqlite_rows(db_path: Path, table: str, columns: list[str]) -> list[tuple]:
     with sqlite3.connect(db_path) as connection:
         connection.row_factory = sqlite3.Row
-        query = f"SELECT {', '.join(columns)} FROM {table}"
+        existing_columns = {
+            row["name"]
+            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        select_columns = [
+            column if column in existing_columns else f"NULL AS {column}"
+            for column in columns
+        ]
+        query = f"SELECT {', '.join(select_columns)} FROM {table}"
         rows = connection.execute(query).fetchall()
         return [tuple(row[column] for column in columns) for row in rows]
 
@@ -145,6 +154,7 @@ async def migrate(
                         streetview_available = 0,
                         streetview_historical_path = '',
                         streetview_historical_date = '',
+                        historical_imagery_checked_at = NULL,
                         satellite_path = '',
                         imagery_fetched_at = NULL,
                         detection_score = NULL,

@@ -49,6 +49,7 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 CORS_ORIGINS = _split_csv_env(os.getenv("CORS_ORIGINS", "")) or DEFAULT_CORS_ORIGINS
+CORS_ORIGIN_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"^https://.*\.vercel\.app$")
 
 # Google Maps API endpoints
 STREETVIEW_URL = "https://maps.googleapis.com/maps/api/streetview"

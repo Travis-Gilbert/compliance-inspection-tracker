@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { getImageUrl, getProperty, updateProperty } from "../utils/api";
+import { fetchHistoricalImagery, getImageUrl, getProperty, updateProperty } from "../utils/api";
 import { DETECTION_LABELS, FINDINGS } from "../utils/constants";
 import InlineNotice from "../components/InlineNotice";
 import { PropertyDetailSkeleton } from "../components/LoadingSkeleton";
@@ -16,6 +16,7 @@ export default function PropertyDetail() {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState(null);
+  const [historicalState, setHistoricalState] = useState({ status: "idle", date: "" });
   const [autoAdvance, setAutoAdvance] = useState(() => {
     if (typeof window === "undefined") {
       return true;
@@ -61,6 +62,70 @@ export default function PropertyDetail() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!property) {
+      setHistoricalState({ status: "idle", date: "" });
+      return;
+    }
+
+    if (property.streetview_historical_path) {
+      setHistoricalState({
+        status: "ready",
+        date: property.streetview_historical_date || "",
+      });
+      return;
+    }
+
+    if (!property.closing_date) {
+      setHistoricalState({ status: "unavailable", date: "" });
+      return;
+    }
+
+    let cancelled = false;
+    setHistoricalState({ status: "loading", date: "" });
+
+    fetchHistoricalImagery(property.id)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        const nextDate = result.actual_date || result.target_date || "";
+        setHistoricalState({
+          status: result.historical_available ? "ready" : "unavailable",
+          date: nextDate,
+        });
+
+        if (result.historical_available) {
+          setProperty((current) => {
+            if (!current || current.id !== property.id) {
+              return current;
+            }
+            return {
+              ...current,
+              streetview_historical_path:
+                result.streetview_historical_path || current.streetview_historical_path,
+              streetview_historical_date: nextDate || current.streetview_historical_date,
+            };
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHistoricalState({ status: "unavailable", date: "" });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    property?.closing_date,
+    property?.id,
+    property?.streetview_historical_date,
+    property?.streetview_historical_path,
+  ]);
 
   const handleFinding = async (finding) => {
     const nextFinding = property.finding === finding ? "" : finding;
@@ -164,6 +229,9 @@ export default function PropertyDetail() {
   const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(property.formatted_address || `${property.address}, Flint, MI`)}`;
   const propertyPortalUrl = `https://www.flintpropertyportal.com/search?q=${encodeURIComponent(property.address)}`;
   const googleMapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(property.formatted_address || `${property.address}, Flint, MI`)}`;
+  const historicalDate = property.streetview_historical_date || historicalState.date || "";
+  const hasHistoricalImage =
+    Boolean(property.streetview_historical_path) || historicalState.status === "ready";
 
   return (
     <div className="space-y-5">
@@ -242,10 +310,43 @@ export default function PropertyDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+        The left image targets the Street View closest to the sold date. The middle image shows the most recent Street View Google has available for the address.
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
-            <span className="text-xs font-medium text-gray-700">Street View</span>
+            <span className="text-xs font-medium text-gray-700">Sold-date Street View</span>
+            {property.closing_date && (
+              <span className="text-xs text-gray-400">Target: {property.closing_date}</span>
+            )}
+          </div>
+          {historicalDate && (
+            <div className="border-b border-gray-100 px-3 py-2 text-xs text-gray-400">
+              Closest panorama: {historicalDate}
+            </div>
+          )}
+          {historicalState.status === "loading" ? (
+            <div className="flex aspect-video w-full items-center justify-center bg-gray-50 text-sm text-gray-400">
+              Loading sold-date Street View...
+            </div>
+          ) : hasHistoricalImage ? (
+            <img
+              src={getImageUrl(property.id, "streetview_historical")}
+              alt={`Historical Street View for ${property.address}`}
+              className="aspect-video w-full object-cover"
+            />
+          ) : (
+            <div className="flex aspect-video w-full items-center justify-center bg-gray-50 px-6 text-center text-sm text-gray-400">
+              No Street View is available close to the sold date.
+            </div>
+          )}
+        </div>
+
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+            <span className="text-xs font-medium text-gray-700">Latest Street View</span>
             {property.streetview_date && (
               <span className="text-xs text-gray-400">Captured: {property.streetview_date}</span>
             )}

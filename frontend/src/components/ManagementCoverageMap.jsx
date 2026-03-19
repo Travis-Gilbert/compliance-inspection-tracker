@@ -427,6 +427,14 @@ export default function ManagementCoverageMap({
                     <div className="uppercase tracking-wide text-[10px] text-gray-400">Buyer</div>
                     <div className="mt-1 font-medium text-gray-800">{activeProperty.buyer_name || "Not listed"}</div>
                   </div>
+                  <div className="rounded border border-gray-200 bg-gray-50 p-2">
+                    <div className="uppercase tracking-wide text-[10px] text-gray-400">Sold Date</div>
+                    <div className="mt-1 font-medium text-gray-800">{activeProperty.closing_date || "Not listed"}</div>
+                  </div>
+                  <div className="rounded border border-gray-200 bg-gray-50 p-2">
+                    <div className="uppercase tracking-wide text-[10px] text-gray-400">Latest Street View</div>
+                    <div className="mt-1 font-medium text-gray-800">{activeProperty.streetview_date || "Not listed"}</div>
+                  </div>
                 </div>
 
                 {activeDetection && (
@@ -458,13 +466,13 @@ export default function ManagementCoverageMap({
                           ? getImageUrl(activeProperty.id, "streetview_historical")
                           : ""
                       }
-                      label={`Historical ${activeProperty.streetview_historical_date || historicalState[activeProperty.id]?.date || ""}`.trim()}
-                      fallback="Historical Street View unavailable"
+                      label={`Sold-date view ${activeProperty.streetview_historical_date || historicalState[activeProperty.id]?.date || ""}`.trim()}
+                      fallback="No Street View is available close to the sold date"
                       loading={historicalState[activeProperty.id]?.status === "loading"}
                     />
                     <ImagePanel
                       src={activeProperty.streetview_available ? getImageUrl(activeProperty.id, "streetview") : ""}
-                      label={`Current ${activeProperty.streetview_date || ""}`.trim()}
+                      label={`Latest ${activeProperty.streetview_date || ""}`.trim()}
                       fallback="Current Street View unavailable"
                     />
                   </div>

@@ -10,6 +10,7 @@ from app.services.imagery import (
     fetch_imagery_for_property,
     batch_fetch_imagery,
     fetch_historical_streetview,
+    batch_fetch_historical_imagery,
 )
 from app.services.enrichment import parse_closing_date
 from app.config import GOOGLE_MAPS_API_KEY
@@ -90,6 +91,9 @@ async def geocode_batch(
 @router.post("/fetch/{property_id}")
 async def fetch_property_imagery(property_id: int, db: aiosqlite.Connection = Depends(get_db)):
     """Fetch Street View and satellite imagery for a single property."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Google Maps API key is not configured")
+
     cursor = await db.execute(
         "SELECT address, latitude, longitude FROM properties WHERE id = ?",
         [property_id],
@@ -126,6 +130,9 @@ async def fetch_batch_imagery(
     db: aiosqlite.Connection = Depends(get_db),
 ):
     """Fetch imagery for all geocoded properties that don't have images yet."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Google Maps API key is not configured")
+
     cursor = await db.execute("""
         SELECT id, address, latitude, longitude FROM properties
         WHERE latitude IS NOT NULL AND imagery_fetched_at IS NULL
@@ -159,6 +166,9 @@ async def fetch_historical_imagery(property_id: int, db: aiosqlite.Connection = 
     """
     Fetch and cache historical Street View imagery using the closing date.
     """
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Google Maps API key is not configured")
+
     cursor = await db.execute(
         """
         SELECT address, latitude, longitude, closing_date,
@@ -185,16 +195,24 @@ async def fetch_historical_imagery(property_id: int, db: aiosqlite.Connection = 
         target_date=target_date,
     )
 
-    if available:
-        await db.execute(
-            """
-            UPDATE properties
-            SET streetview_historical_path = ?, streetview_historical_date = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            [path, actual_date, datetime.now().isoformat(), property_id],
-        )
-        await db.commit()
+    await db.execute(
+        """
+        UPDATE properties
+        SET streetview_historical_path = ?,
+            streetview_historical_date = ?,
+            historical_imagery_checked_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        [
+            path if available else "",
+            actual_date if available else "",
+            datetime.now().isoformat(),
+            datetime.now().isoformat(),
+            property_id,
+        ],
+    )
+    await db.commit()
 
     return {
         "property_id": property_id,
@@ -202,6 +220,67 @@ async def fetch_historical_imagery(property_id: int, db: aiosqlite.Connection = 
         "target_date": target_date,
         "actual_date": actual_date,
         "streetview_historical_path": path,
+    }
+
+
+@router.post("/fetch-historical-batch")
+async def fetch_historical_batch(
+    limit: int = Query(25, description="Max properties to fetch historical imagery for"),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """Fetch historical Street View imagery near the closing date for properties with current coverage."""
+    if not GOOGLE_MAPS_API_KEY:
+        raise HTTPException(status_code=503, detail="Google Maps API key is not configured")
+
+    cursor = await db.execute(
+        """
+        SELECT id, address, latitude, longitude, closing_date FROM properties
+        WHERE streetview_available = 1
+          AND COALESCE(closing_date, '') != ''
+          AND COALESCE(historical_imagery_checked_at, '') = ''
+        LIMIT ?
+        """,
+        [limit],
+    )
+    rows = await cursor.fetchall()
+    if not rows:
+        return {"fetched": 0, "message": "All eligible properties already have historical imagery checked"}
+
+    results = await batch_fetch_historical_imagery([dict(row) for row in rows])
+
+    fetched = 0
+    available = 0
+    now = datetime.now().isoformat()
+    for row in rows:
+        result = results.get(row["id"])
+        if result is None:
+            continue
+        await db.execute(
+            """
+            UPDATE properties
+            SET streetview_historical_path = ?,
+                streetview_historical_date = ?,
+                historical_imagery_checked_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            [
+                result.streetview_historical_path if result.historical_available else "",
+                result.streetview_historical_date if result.historical_available else "",
+                now,
+                now,
+                row["id"],
+            ],
+        )
+        fetched += 1
+        if result.historical_available:
+            available += 1
+
+    await db.commit()
+    return {
+        "fetched": fetched,
+        "available": available,
+        "total_attempted": len(rows),
     }
 
 

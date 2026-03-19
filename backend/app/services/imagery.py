@@ -13,6 +13,7 @@ from app.config import (
     STREETVIEW_SIZE,
     STREETVIEW_URL,
 )
+from app.services.enrichment import parse_closing_date
 from app.utils.images import get_image_path, image_exists, save_image
 
 
@@ -28,6 +29,20 @@ class ImageryResult:
         self.streetview_available = streetview_available
         self.streetview_date = streetview_date
         self.satellite_path = satellite_path
+
+
+class HistoricalImageryResult:
+    def __init__(
+        self,
+        streetview_historical_path: str = "",
+        historical_available: bool = False,
+        streetview_historical_date: str = "",
+        target_date: str = "",
+    ):
+        self.streetview_historical_path = streetview_historical_path
+        self.historical_available = historical_available
+        self.streetview_historical_date = streetview_historical_date
+        self.target_date = target_date
 
 
 async def _request_with_semaphore(
@@ -288,6 +303,82 @@ async def batch_fetch_imagery(
             return prop_id, result
         except Exception:
             return prop_id, ImageryResult()
+
+    async def run_batch(shared_client: httpx.AsyncClient):
+        tasks = [
+            asyncio.create_task(fetch_one(prop, shared_client))
+            for prop in properties
+        ]
+        for current, task in enumerate(asyncio.as_completed(tasks), start=1):
+            prop_id, imagery = await task
+            results[prop_id] = imagery
+            if on_result:
+                maybe_coro = on_result(prop_id, imagery, current, total)
+                if asyncio.iscoroutine(maybe_coro):
+                    await maybe_coro
+
+    if client:
+        await run_batch(client)
+        return results
+
+    async with httpx.AsyncClient(timeout=15.0) as shared_client:
+        await run_batch(shared_client)
+    return results
+
+
+async def batch_fetch_historical_imagery(
+    properties: list[dict],
+    concurrency: int = IMAGERY_CONCURRENCY,
+    client: Optional[httpx.AsyncClient] = None,
+    on_result: Optional[
+        Callable[[int, HistoricalImageryResult, int, int], Awaitable[None] | None]
+    ] = None,
+) -> dict[int, HistoricalImageryResult]:
+    """
+    Fetch historical Street View imagery near each property's closing date.
+    Each property dict should have: id, latitude, longitude, address, closing_date.
+    Returns dict mapping property_id -> HistoricalImageryResult.
+    """
+    if not properties:
+        return {}
+    if not GOOGLE_MAPS_API_KEY:
+        return {prop["id"]: HistoricalImageryResult() for prop in properties}
+
+    total = len(properties)
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    results: dict[int, HistoricalImageryResult] = {}
+
+    async def fetch_one(
+        prop: dict,
+        shared_client: httpx.AsyncClient,
+    ) -> tuple[int, HistoricalImageryResult]:
+        prop_id = prop["id"]
+        lat = prop.get("latitude")
+        lng = prop.get("longitude")
+        address = prop.get("address", "")
+        parsed = parse_closing_date(prop.get("closing_date", ""))
+        if lat is None or lng is None or not parsed:
+            return prop_id, HistoricalImageryResult()
+
+        target_date = parsed.strftime("%Y-%m")
+        try:
+            path, available, actual_date = await fetch_historical_streetview(
+                lat,
+                lng,
+                address,
+                target_date=target_date,
+                client=shared_client,
+                semaphore=semaphore,
+            )
+        except Exception:
+            return prop_id, HistoricalImageryResult(target_date=target_date)
+
+        return prop_id, HistoricalImageryResult(
+            streetview_historical_path=path,
+            historical_available=available,
+            streetview_historical_date=actual_date,
+            target_date=target_date,
+        )
 
     async def run_batch(shared_client: httpx.AsyncClient):
         tasks = [

@@ -19,6 +19,7 @@ import { DashboardSkeleton } from "../components/LoadingSkeleton";
 const STEP_LABELS = {
   geocode: "Geocoding addresses",
   imagery: "Fetching imagery",
+  historical: "Fetching sold-date imagery",
   detection: "Running detection",
 };
 
@@ -27,7 +28,7 @@ function PipelineProgress({ events }) {
     return null;
   }
 
-  const steps = ["geocode", "imagery", "detection"];
+  const steps = ["geocode", "imagery", "historical", "detection"];
   const stepState = {};
   let grandTotals = null;
   let grandProcessed = 0;
@@ -46,7 +47,13 @@ function PipelineProgress({ events }) {
 
   const completeEvent = [...events].reverse().find((event) => event.step === "complete");
   const errorEvent = [...events].reverse().find((event) => event.step === "error");
-  const grandTotal = grandTotals?.total || 0;
+  const grandTotal = steps.reduce((sum, step) => {
+    const state = stepState[step];
+    if (state) {
+      return sum + (state.total ?? state.attempted ?? 0);
+    }
+    return sum + (grandTotals?.[step] ?? 0);
+  }, 0);
   const grandPct = grandTotal > 0 ? Math.round((grandProcessed / grandTotal) * 100) : 0;
 
   return (
@@ -355,7 +362,7 @@ export default function Dashboard() {
       <div className="rounded-lg border border-gray-200 bg-white p-5">
         <h3 className="mb-2 font-heading font-semibold text-gray-900">Processing Pipeline</h3>
         <p className="mb-4 text-sm text-gray-600">
-          Import properties, then run the pipeline to geocode addresses, fetch Street View and satellite imagery, and run smart detection. Properties flagged as likely vacant or demolished will sort to the top of your review queue.
+          Import properties, then run the pipeline to geocode addresses, fetch current Street View and satellite imagery, pull the Street View closest to the sold date, and run smart detection. Properties flagged as likely vacant or demolished will sort to the top of your review queue.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <button

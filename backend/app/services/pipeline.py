@@ -7,13 +7,14 @@ from app.config import (
     DATABASE_PATH,
     DETECTION_WORKERS,
     GEOCODE_CONCURRENCY,
+    GOOGLE_MAPS_API_KEY,
     IMAGERY_CONCURRENCY,
     PIPELINE_BATCH_SIZE,
 )
 from app.models.database import DatabaseConnection, connect_db
 from app.services.detector import batch_detect
 from app.services.geocoder import batch_geocode
-from app.services.imagery import batch_fetch_imagery
+from app.services.imagery import batch_fetch_historical_imagery, batch_fetch_imagery
 
 PipelineEmitter = Optional[Callable[[dict], Awaitable[None] | None]]
 
@@ -34,6 +35,7 @@ def _init_totals():
     return {
         "geocode": {"attempted": 0, "processed": 0},
         "imagery": {"attempted": 0, "processed": 0},
+        "historical": {"attempted": 0, "processed": 0},
         "detection": {"attempted": 0, "processed": 0},
     }
 
@@ -97,6 +99,11 @@ async def _run_imagery_step(
     cycle: int,
     emitter: PipelineEmitter,
 ) -> dict:
+    if not GOOGLE_MAPS_API_KEY:
+        done = {"attempted": 0, "processed": 0, "message": "Google Maps API key not configured"}
+        await _emit(emitter, {"step": "imagery", "status": "done", "cycle": cycle, **done})
+        return done
+
     cursor = await db.execute(
         """
         SELECT id, address, latitude, longitude FROM properties
@@ -157,6 +164,82 @@ async def _run_imagery_step(
     await db.commit()
     done = {"attempted": total, "processed": processed, "with_imagery": with_imagery}
     await _emit(emitter, {"step": "imagery", "status": "done", "cycle": cycle, **done})
+    return done
+
+
+async def _run_historical_step(
+    db: DatabaseConnection,
+    limit: int,
+    cycle: int,
+    emitter: PipelineEmitter,
+) -> dict:
+    if not GOOGLE_MAPS_API_KEY:
+        done = {"attempted": 0, "processed": 0, "message": "Google Maps API key not configured"}
+        await _emit(emitter, {"step": "historical", "status": "done", "cycle": cycle, **done})
+        return done
+
+    cursor = await db.execute(
+        """
+        SELECT id, address, latitude, longitude, closing_date FROM properties
+        WHERE streetview_available = 1
+          AND COALESCE(closing_date, '') != ''
+          AND COALESCE(historical_imagery_checked_at, '') = ''
+        LIMIT ?
+        """,
+        [limit],
+    )
+    rows = await cursor.fetchall()
+    total = len(rows)
+    await _emit(emitter, {"step": "historical", "status": "started", "total": total, "cycle": cycle})
+
+    if not rows:
+        done = {"attempted": 0, "processed": 0, "message": "All historical imagery checked"}
+        await _emit(emitter, {"step": "historical", "status": "done", "cycle": cycle, **done})
+        return done
+
+    async def on_result(_prop_id: int, _result, current: int, count: int):
+        await _emit(
+            emitter,
+            {"step": "historical", "status": "progress", "current": current, "total": count, "cycle": cycle},
+        )
+
+    historical_results = await batch_fetch_historical_imagery(
+        [dict(row) for row in rows],
+        concurrency=IMAGERY_CONCURRENCY,
+        on_result=on_result,
+    )
+
+    processed = 0
+    with_historical = 0
+    now = _now_iso()
+    for row in rows:
+        result = historical_results.get(row["id"])
+        if result is None:
+            continue
+        await db.execute(
+            """
+            UPDATE properties
+            SET streetview_historical_path = ?,
+                streetview_historical_date = ?,
+                historical_imagery_checked_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            [
+                result.streetview_historical_path if result.historical_available else "",
+                result.streetview_historical_date if result.historical_available else "",
+                now,
+                now,
+                row["id"],
+            ],
+        )
+        processed += 1
+        if result.historical_available:
+            with_historical += 1
+
+    await db.commit()
+    done = {"attempted": total, "processed": processed, "with_historical": with_historical}
+    await _emit(emitter, {"step": "historical", "status": "done", "cycle": cycle, **done})
     return done
 
 
@@ -223,6 +306,7 @@ async def _run_detection_step(
 async def run_pipeline(
     geocode: bool = True,
     fetch_images: bool = True,
+    fetch_historical: bool = True,
     run_detection_step: bool = True,
     limit: int = PIPELINE_BATCH_SIZE,
     process_all: bool = False,
@@ -253,6 +337,12 @@ async def run_pipeline(
                 totals["imagery"]["processed"] += step.get("processed", 0)
                 cycle_processed += step.get("processed", 0)
 
+            if fetch_historical:
+                step = await _run_historical_step(db, batch_limit, cycle_count, emitter)
+                totals["historical"]["attempted"] += step.get("attempted", 0)
+                totals["historical"]["processed"] += step.get("processed", 0)
+                cycle_processed += step.get("processed", 0)
+
             if run_detection_step:
                 step = await _run_detection_step(db, batch_limit, cycle_count, emitter)
                 totals["detection"]["attempted"] += step.get("attempted", 0)
@@ -274,6 +364,7 @@ async def run_pipeline(
         "steps": [
             {"geocode": totals["geocode"]},
             {"imagery": totals["imagery"]},
+            {"historical": totals["historical"]},
             {"detection": totals["detection"]},
         ],
     }

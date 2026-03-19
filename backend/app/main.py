@@ -13,7 +13,13 @@ from app.api.properties import router as properties_router
 from app.api.imagery import router as imagery_router
 from app.api.detection import router as detection_router
 from app.api.comms import router as comms_router
-from app.config import CORS_ORIGINS, IMAGE_CACHE_DIR, PIPELINE_BATCH_SIZE
+from app.config import (
+    CORS_ORIGIN_REGEX,
+    CORS_ORIGINS,
+    GOOGLE_MAPS_API_KEY,
+    IMAGE_CACHE_DIR,
+    PIPELINE_BATCH_SIZE,
+)
 from app.services.pipeline import run_pipeline as run_pipeline_service
 
 
@@ -35,6 +41,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,6 +84,7 @@ async def health():
 async def run_pipeline(
     geocode: bool = True,
     fetch_images: bool = True,
+    fetch_historical: bool = True,
     run_detection: bool = True,
     limit: int = PIPELINE_BATCH_SIZE,
     process_all: bool = False,
@@ -87,6 +95,7 @@ async def run_pipeline(
     return await run_pipeline_service(
         geocode=geocode,
         fetch_images=fetch_images,
+        fetch_historical=fetch_historical,
         run_detection_step=run_detection,
         limit=limit,
         process_all=process_all,
@@ -99,6 +108,7 @@ async def run_pipeline(
 async def run_pipeline_stream(
     geocode: bool = True,
     fetch_images: bool = True,
+    fetch_historical: bool = True,
     run_detection: bool = True,
     limit: int = PIPELINE_BATCH_SIZE,
     process_all: bool = False,
@@ -120,6 +130,7 @@ async def run_pipeline_stream(
             run_pipeline_service(
                 geocode=geocode,
                 fetch_images=fetch_images,
+                fetch_historical=fetch_historical,
                 run_detection_step=run_detection,
                 limit=limit,
                 process_all=process_all,
@@ -175,6 +186,16 @@ async def run_pipeline_all(batch_size: int = 100):
             total_imagery = (await cur.fetchone())[0]
 
             cur = await db.execute(
+                """
+                SELECT COUNT(*) FROM properties
+                WHERE streetview_available = 1
+                  AND COALESCE(closing_date, '') != ''
+                  AND COALESCE(historical_imagery_checked_at, '') = ''
+                """
+            )
+            total_historical = (await cur.fetchone())[0]
+
+            cur = await db.execute(
                 "SELECT COUNT(*) FROM properties WHERE imagery_fetched_at IS NOT NULL AND detection_ran_at IS NULL"
             )
             total_detection = (await cur.fetchone())[0]
@@ -185,8 +206,9 @@ async def run_pipeline_all(batch_size: int = 100):
                 "grand_totals": {
                     "geocode": total_geocode,
                     "imagery": total_imagery,
+                    "historical": total_historical,
                     "detection": total_detection,
-                    "total": total_geocode + total_imagery + total_detection,
+                    "total": total_geocode + total_imagery + total_historical + total_detection,
                 },
             })
 
@@ -249,7 +271,7 @@ async def run_pipeline_all(batch_size: int = 100):
             total_imagery = (await cur.fetchone())[0]
 
             # Step 2: Fetch imagery for all
-            if total_imagery > 0:
+            if total_imagery > 0 and GOOGLE_MAPS_API_KEY:
                 from app.services.imagery import fetch_imagery_for_property
                 processed_img = 0
                 batch_num = 0
@@ -314,6 +336,128 @@ async def run_pipeline_all(batch_size: int = 100):
                     "status": "done",
                     "processed": processed_img,
                     "total": total_imagery,
+                })
+            elif total_imagery > 0:
+                yield sse({
+                    "step": "imagery",
+                    "status": "done",
+                    "processed": 0,
+                    "total": total_imagery,
+                    "message": "Google Maps API key not configured",
+                })
+
+            cur = await db.execute(
+                """
+                SELECT COUNT(*) FROM properties
+                WHERE streetview_available = 1
+                  AND COALESCE(closing_date, '') != ''
+                  AND COALESCE(historical_imagery_checked_at, '') = ''
+                """
+            )
+            total_historical = (await cur.fetchone())[0]
+
+            if total_historical > 0 and GOOGLE_MAPS_API_KEY:
+                from app.services.enrichment import parse_closing_date
+                from app.services.imagery import fetch_historical_streetview
+
+                processed_historical = 0
+                batch_num = 0
+
+                while True:
+                    cursor = await db.execute(
+                        """
+                        SELECT id, address, latitude, longitude, closing_date FROM properties
+                        WHERE streetview_available = 1
+                          AND COALESCE(closing_date, '') != ''
+                          AND COALESCE(historical_imagery_checked_at, '') = ''
+                        LIMIT ?
+                        """,
+                        [batch_size],
+                    )
+                    rows = await cursor.fetchall()
+                    if not rows:
+                        break
+
+                    batch_num += 1
+                    available_batch = 0
+                    for row in rows:
+                        prop = dict(row)
+                        parsed = parse_closing_date(prop.get("closing_date", ""))
+                        if not parsed:
+                            continue
+
+                        actual_date = ""
+                        path = ""
+                        available = False
+                        try:
+                            path, available, actual_date = await fetch_historical_streetview(
+                                prop["latitude"],
+                                prop["longitude"],
+                                prop["address"],
+                                target_date=parsed.strftime("%Y-%m"),
+                            )
+                        except Exception:
+                            pass
+
+                        await db.execute(
+                            """
+                            UPDATE properties
+                            SET streetview_historical_path = ?,
+                                streetview_historical_date = ?,
+                                historical_imagery_checked_at = ?,
+                                updated_at = ?
+                            WHERE id = ?
+                            """,
+                            [
+                                path if available else "",
+                                actual_date if available else "",
+                                datetime.now().isoformat(),
+                                datetime.now().isoformat(),
+                                prop["id"],
+                            ],
+                        )
+                        if available:
+                            available_batch += 1
+                        processed_historical += 1
+                        grand_processed += 1
+
+                        if processed_historical % 5 == 0 or processed_historical == total_historical:
+                            yield sse({
+                                "step": "historical",
+                                "status": "progress",
+                                "current": processed_historical,
+                                "total": total_historical,
+                                "batch": batch_num,
+                                "grand_processed": grand_processed,
+                            })
+
+                    await db.commit()
+
+                    yield sse({
+                        "step": "historical",
+                        "status": "batch_complete",
+                        "batch": batch_num,
+                        "batch_available": available_batch,
+                        "current": processed_historical,
+                        "total": total_historical,
+                        "grand_processed": grand_processed,
+                    })
+
+                    await asyncio.sleep(0.1)
+
+                yield sse({
+                    "step": "historical",
+                    "status": "done",
+                    "processed": processed_historical,
+                    "total": total_historical,
+                })
+            elif total_historical > 0:
+                yield sse({
+                    "step": "historical",
+                    "status": "done",
+                    "processed": 0,
+                    "total": total_historical,
+                    "message": "Google Maps API key not configured",
                 })
 
             # Recount detection totals (imagery may have made more eligible)

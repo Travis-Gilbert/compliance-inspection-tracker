@@ -93,7 +93,12 @@ async def set_sequence(connection, table: str):
     )
 
 
-async def migrate(sqlite_path: Path, database_url: str, clear_target: bool):
+async def migrate(
+    sqlite_path: Path,
+    database_url: str,
+    clear_target: bool,
+    preserve_derived_state: bool,
+):
     os.environ["DATABASE_URL"] = database_url
 
     import asyncpg
@@ -131,6 +136,24 @@ async def migrate(sqlite_path: Path, database_url: str, clear_target: bool):
             )
             await set_sequence(connection, "properties")
 
+            if not preserve_derived_state:
+                await connection.execute(
+                    """
+                    UPDATE properties
+                    SET streetview_path = '',
+                        streetview_date = '',
+                        streetview_available = 0,
+                        streetview_historical_path = '',
+                        streetview_historical_date = '',
+                        satellite_path = '',
+                        imagery_fetched_at = NULL,
+                        detection_score = NULL,
+                        detection_label = '',
+                        detection_details = '',
+                        detection_ran_at = NULL
+                    """
+                )
+
         if communications:
             placeholders = ", ".join(f"${index}" for index in range(1, len(COMMUNICATION_COLUMNS) + 1))
             await connection.executemany(
@@ -148,7 +171,11 @@ async def migrate(sqlite_path: Path, database_url: str, clear_target: bool):
         f"Migrated {len(properties)} properties, {len(communications)} communications, "
         f"and {len(import_batches)} import batches into Postgres."
     )
-    print("Note: cached imagery files were not copied. Re-run imagery fetches or sync IMAGE_CACHE_DIR separately.")
+    if preserve_derived_state:
+        print("Note: cached imagery files were not copied. Image paths and detection state were preserved as-is.")
+    else:
+        print("Derived imagery and detection fields were reset because cached image files were not copied.")
+        print("Re-run imagery fetches and detection after setting IMAGE_CACHE_DIR and GOOGLE_MAPS_API_KEY.")
 
 
 def main():
@@ -170,6 +197,11 @@ def main():
         action="store_true",
         help="Keep existing destination rows instead of truncating target tables first.",
     )
+    parser.add_argument(
+        "--preserve-derived-state",
+        action="store_true",
+        help="Keep migrated imagery paths and detection fields instead of clearing them.",
+    )
     args = parser.parse_args()
 
     sqlite_path = Path(args.sqlite_path).expanduser().resolve()
@@ -183,6 +215,7 @@ def main():
             sqlite_path=sqlite_path,
             database_url=args.database_url,
             clear_target=not args.skip_clear,
+            preserve_derived_state=args.preserve_derived_state,
         )
     )
 

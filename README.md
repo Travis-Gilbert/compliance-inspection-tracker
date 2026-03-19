@@ -137,6 +137,7 @@ python3 scripts/migrate_sqlite_to_postgres.py \
 ```
 
 This migrates properties, communications, and import batches. Cached imagery files stay on disk, so re-run imagery fetches or sync `IMAGE_CACHE_DIR` separately after the DB move.
+By default, the migration script clears imagery and detection fields on the target because those cached files are not copied. Use `--preserve-derived-state` only if you are also moving the image cache.
 
 ### PostGIS note
 

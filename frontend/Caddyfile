@@ -2,7 +2,8 @@
 	auto_https off
 }
 
-http://0.0.0.0:{$PORT} {
+http://:{$PORT} {
+	bind 0.0.0.0
 	root * /srv
 	encode zstd gzip
 	try_files {path} /index.html

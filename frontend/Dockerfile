@@ -16,8 +16,11 @@ FROM node:20-alpine AS runtime
 
 WORKDIR /app
 
-RUN npm install -g serve
+RUN npm install -g serve@14
 
 COPY --from=build /app/dist ./dist
 
-CMD ["sh", "-c", "serve -s dist -l tcp://0.0.0.0:${PORT:-3000}"]
+EXPOSE 3000
+ENV PORT=3000
+
+CMD ["serve", "-s", "dist", "-l", "tcp://0.0.0.0:3000"]

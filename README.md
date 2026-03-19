@@ -145,16 +145,15 @@ The backend will attempt to enable PostGIS and add a spatial `location` column w
 
 ### Frontend service
 
-Set the frontend service to the `frontend/` directory and use the included `Dockerfile`.
+You can deploy the frontend from the `frontend/` directory on Vercel or Railway.
 
-Set this env var on the frontend service:
+Set this env var on the frontend deployment:
 
 ```bash
 VITE_API_BASE_URL=https://your-backend-domain
 ```
 
-The Docker image serves the built app with SPA fallback, so routes like
-`/review`, `/property/123`, and `/map` load correctly.
+The frontend includes [vercel.json](/Users/travisgilbert/Downloads/files%20(10)/compliance-tracker/frontend/vercel.json) so SPA routes like `/review`, `/property/123`, and `/map` rewrite to `index.html` on Vercel.
 
 ### Monorepo setup
 

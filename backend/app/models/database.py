@@ -1,7 +1,186 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from typing import Any
+
 import aiosqlite
 
-from app.config import DATABASE_PATH
+try:
+    import asyncpg
+except ImportError:  # pragma: no cover, exercised only when Postgres support is unavailable
+    asyncpg = None
+
+from app.config import DATABASE_PATH, DATABASE_URL
 from app.utils.address import build_address_key
+
+DatabaseConnection = Any
+
+
+SQLITE_SCHEMA_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS properties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        address TEXT NOT NULL,
+        address_key TEXT DEFAULT '',
+        parcel_id TEXT DEFAULT '',
+        buyer_name TEXT DEFAULT '',
+        program TEXT DEFAULT '',
+        closing_date TEXT DEFAULT '',
+        commitment TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        organization TEXT DEFAULT '',
+        purchase_type TEXT DEFAULT '',
+        compliance_1st_attempt TEXT DEFAULT '',
+        compliance_2nd_attempt TEXT DEFAULT '',
+
+        latitude REAL,
+        longitude REAL,
+        formatted_address TEXT DEFAULT '',
+        geocoded_at TEXT,
+
+        streetview_path TEXT DEFAULT '',
+        streetview_date TEXT DEFAULT '',
+        streetview_available INTEGER DEFAULT 0,
+        streetview_historical_path TEXT DEFAULT '',
+        streetview_historical_date TEXT DEFAULT '',
+        satellite_path TEXT DEFAULT '',
+        imagery_fetched_at TEXT,
+
+        detection_score REAL,
+        detection_label TEXT DEFAULT '',
+        detection_details TEXT DEFAULT '',
+        detection_ran_at TEXT,
+
+        finding TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        reviewed_at TEXT,
+        reviewed_by TEXT DEFAULT 'staff',
+
+        import_batch TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS communications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER NOT NULL,
+        method TEXT NOT NULL,
+        direction TEXT DEFAULT 'outbound',
+        date_sent TEXT,
+        subject TEXT DEFAULT '',
+        body TEXT DEFAULT '',
+        response_received INTEGER DEFAULT 0,
+        response_date TEXT,
+        response_notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS import_batches (
+        id TEXT PRIMARY KEY,
+        filename TEXT DEFAULT '',
+        row_count INTEGER DEFAULT 0,
+        imported_at TEXT DEFAULT (datetime('now')),
+        notes TEXT DEFAULT ''
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_properties_finding ON properties(finding)",
+    "CREATE INDEX IF NOT EXISTS idx_properties_detection ON properties(detection_label)",
+    "CREATE INDEX IF NOT EXISTS idx_properties_parcel ON properties(parcel_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comms_property ON communications(property_id)",
+]
+
+POSTGRES_SCHEMA_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS properties (
+        id SERIAL PRIMARY KEY,
+        address TEXT NOT NULL,
+        address_key TEXT DEFAULT '',
+        parcel_id TEXT DEFAULT '',
+        buyer_name TEXT DEFAULT '',
+        program TEXT DEFAULT '',
+        closing_date TEXT DEFAULT '',
+        commitment TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        organization TEXT DEFAULT '',
+        purchase_type TEXT DEFAULT '',
+        compliance_1st_attempt TEXT DEFAULT '',
+        compliance_2nd_attempt TEXT DEFAULT '',
+
+        latitude DOUBLE PRECISION,
+        longitude DOUBLE PRECISION,
+        formatted_address TEXT DEFAULT '',
+        geocoded_at TEXT,
+
+        streetview_path TEXT DEFAULT '',
+        streetview_date TEXT DEFAULT '',
+        streetview_available INTEGER DEFAULT 0,
+        streetview_historical_path TEXT DEFAULT '',
+        streetview_historical_date TEXT DEFAULT '',
+        satellite_path TEXT DEFAULT '',
+        imagery_fetched_at TEXT,
+
+        detection_score DOUBLE PRECISION,
+        detection_label TEXT DEFAULT '',
+        detection_details TEXT DEFAULT '',
+        detection_ran_at TEXT,
+
+        finding TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        reviewed_at TEXT,
+        reviewed_by TEXT DEFAULT 'staff',
+
+        import_batch TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP::text,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP::text
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS communications (
+        id SERIAL PRIMARY KEY,
+        property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        method TEXT NOT NULL,
+        direction TEXT DEFAULT 'outbound',
+        date_sent TEXT,
+        subject TEXT DEFAULT '',
+        body TEXT DEFAULT '',
+        response_received INTEGER DEFAULT 0,
+        response_date TEXT,
+        response_notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP::text
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS import_batches (
+        id TEXT PRIMARY KEY,
+        filename TEXT DEFAULT '',
+        row_count INTEGER DEFAULT 0,
+        imported_at TEXT DEFAULT CURRENT_TIMESTAMP::text,
+        notes TEXT DEFAULT ''
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_properties_finding ON properties(finding)",
+    "CREATE INDEX IF NOT EXISTS idx_properties_detection ON properties(detection_label)",
+    "CREATE INDEX IF NOT EXISTS idx_properties_parcel ON properties(parcel_id)",
+    "CREATE INDEX IF NOT EXISTS idx_comms_property ON communications(property_id)",
+]
+
+MIGRATION_COLUMNS = [
+    ("email", "TEXT DEFAULT ''"),
+    ("organization", "TEXT DEFAULT ''"),
+    ("purchase_type", "TEXT DEFAULT ''"),
+    ("compliance_1st_attempt", "TEXT DEFAULT ''"),
+    ("compliance_2nd_attempt", "TEXT DEFAULT ''"),
+    ("streetview_historical_path", "TEXT DEFAULT ''"),
+    ("streetview_historical_date", "TEXT DEFAULT ''"),
+    ("address_key", "TEXT DEFAULT ''"),
+]
+
+
+def using_postgres() -> bool:
+    return bool(DATABASE_URL)
 
 
 def _has_value(value):
@@ -10,6 +189,117 @@ def _has_value(value):
     if isinstance(value, str):
         return value.strip() != ""
     return True
+
+
+class DBRow(dict):
+    def __init__(self, mapping: dict[str, Any]):
+        super().__init__(mapping)
+        self._values = list(mapping.values())
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class PostgresCursor:
+    def __init__(self, rows: list[DBRow] | None = None, lastrowid=None):
+        self._rows = rows or []
+        self._index = 0
+        self.lastrowid = lastrowid
+
+    async def fetchone(self):
+        if self._index >= len(self._rows):
+            return None
+        row = self._rows[self._index]
+        self._index += 1
+        return row
+
+    async def fetchall(self):
+        if self._index >= len(self._rows):
+            return []
+        rows = self._rows[self._index:]
+        self._index = len(self._rows)
+        return rows
+
+
+def _translate_postgres_placeholders(query: str) -> str:
+    translated: list[str] = []
+    param_index = 1
+    in_single_quote = False
+
+    for char in query:
+        if char == "'":
+            in_single_quote = not in_single_quote
+            translated.append(char)
+            continue
+        if char == "?" and not in_single_quote:
+            translated.append(f"${param_index}")
+            param_index += 1
+            continue
+        translated.append(char)
+
+    return "".join(translated)
+
+
+class PostgresConnection:
+    def __init__(self, connection):
+        self._connection = connection
+        self.row_factory = None
+        self.is_postgres = True
+
+    @classmethod
+    async def connect(cls, dsn: str):
+        if asyncpg is None:
+            raise RuntimeError("asyncpg is required when DATABASE_URL is set")
+        connection = await asyncpg.connect(dsn, statement_cache_size=0)
+        return cls(connection)
+
+    async def execute(self, query: str, params=None):
+        params = list(params or [])
+        translated = _translate_postgres_placeholders(query)
+        normalized = query.lstrip().lower()
+
+        if normalized.startswith("select") or normalized.startswith("with"):
+            rows = await self._connection.fetch(translated, *params)
+            return PostgresCursor([DBRow(dict(row)) for row in rows])
+
+        if normalized.startswith("insert"):
+            insert_query = translated
+            if " returning " not in normalized:
+                insert_query = f"{translated.rstrip()} RETURNING id"
+            row = await self._connection.fetchrow(insert_query, *params)
+            rows = [DBRow(dict(row))] if row else []
+            lastrowid = row["id"] if row and "id" in row else None
+            return PostgresCursor(rows=rows, lastrowid=lastrowid)
+
+        await self._connection.execute(translated, *params)
+        return PostgresCursor()
+
+    async def commit(self):
+        return None
+
+    async def close(self):
+        await self._connection.close()
+
+
+async def _open_db_connection():
+    if using_postgres():
+        return await PostgresConnection.connect(DATABASE_URL)
+
+    db = await aiosqlite.connect(DATABASE_PATH)
+    db.row_factory = aiosqlite.Row
+    await db.execute("PRAGMA foreign_keys = ON")
+    return db
+
+
+@asynccontextmanager
+async def connect_db():
+    db = await _open_db_connection()
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 def _dedupe_score(row: dict) -> int:
@@ -112,7 +402,7 @@ def _merge_property_rows(primary: dict, duplicates: list[dict]) -> dict:
     return merged
 
 
-async def _dedupe_properties(db: aiosqlite.Connection):
+async def _dedupe_properties(db: DatabaseConnection):
     cursor = await db.execute("SELECT * FROM properties ORDER BY id")
     rows = [dict(row) for row in await cursor.fetchall()]
     groups = {}
@@ -198,10 +488,55 @@ async def _dedupe_properties(db: aiosqlite.Connection):
         )
 
 
+async def _ensure_postgis(db: DatabaseConnection):
+    try:
+        await db.execute("CREATE EXTENSION IF NOT EXISTS postgis")
+        await db.execute(
+            "ALTER TABLE properties ADD COLUMN IF NOT EXISTS location geography(Point, 4326)"
+        )
+        await db.execute(
+            """
+            CREATE OR REPLACE FUNCTION set_property_location()
+            RETURNS trigger AS $$
+            BEGIN
+                IF NEW.latitude IS NOT NULL AND NEW.longitude IS NOT NULL THEN
+                    NEW.location = ST_SetSRID(ST_MakePoint(NEW.longitude, NEW.latitude), 4326)::geography;
+                ELSE
+                    NEW.location = NULL;
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+            """
+        )
+        await db.execute("DROP TRIGGER IF EXISTS trg_properties_location ON properties")
+        await db.execute(
+            """
+            CREATE TRIGGER trg_properties_location
+            BEFORE INSERT OR UPDATE OF latitude, longitude ON properties
+            FOR EACH ROW EXECUTE FUNCTION set_property_location()
+            """
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_properties_location ON properties USING GIST (location)"
+        )
+        await db.execute(
+            """
+            UPDATE properties
+            SET location = CASE
+                WHEN latitude IS NOT NULL AND longitude IS NOT NULL
+                THEN ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography
+                ELSE NULL
+            END
+            """
+        )
+    except Exception as exc:  # pragma: no cover, depends on target Postgres capabilities
+        print(f"Warning: PostGIS setup skipped: {exc}")
+
+
 async def get_db():
-    """Yield an async SQLite connection."""
-    db = await aiosqlite.connect(DATABASE_PATH)
-    db.row_factory = aiosqlite.Row
+    """Yield a portable database connection."""
+    db = await _open_db_connection()
     try:
         yield db
     finally:
@@ -209,102 +544,20 @@ async def get_db():
 
 
 async def init_db():
-    """Create tables if they don't exist."""
-    async with aiosqlite.connect(DATABASE_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS properties (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                address TEXT NOT NULL,
-                address_key TEXT DEFAULT '',
-                parcel_id TEXT DEFAULT '',
-                buyer_name TEXT DEFAULT '',
-                program TEXT DEFAULT '',
-                closing_date TEXT DEFAULT '',
-                commitment TEXT DEFAULT '',
-                email TEXT DEFAULT '',
-                organization TEXT DEFAULT '',
-                purchase_type TEXT DEFAULT '',
-                compliance_1st_attempt TEXT DEFAULT '',
-                compliance_2nd_attempt TEXT DEFAULT '',
+    """Create tables if they don't exist, then run lightweight migrations."""
+    async with connect_db() as db:
+        schema_statements = POSTGRES_SCHEMA_STATEMENTS if using_postgres() else SQLITE_SCHEMA_STATEMENTS
+        for statement in schema_statements:
+            await db.execute(statement)
 
-                -- Geocoding results
-                latitude REAL,
-                longitude REAL,
-                formatted_address TEXT DEFAULT '',
-                geocoded_at TEXT,
-
-                -- Imagery
-                streetview_path TEXT DEFAULT '',
-                streetview_date TEXT DEFAULT '',
-                streetview_available INTEGER DEFAULT 0,
-                streetview_historical_path TEXT DEFAULT '',
-                streetview_historical_date TEXT DEFAULT '',
-                satellite_path TEXT DEFAULT '',
-                imagery_fetched_at TEXT,
-
-                -- Smart detection
-                detection_score REAL,
-                detection_label TEXT DEFAULT '',
-                detection_details TEXT DEFAULT '',
-                detection_ran_at TEXT,
-
-                -- Review
-                finding TEXT DEFAULT '',
-                notes TEXT DEFAULT '',
-                reviewed_at TEXT,
-                reviewed_by TEXT DEFAULT 'staff',
-
-                -- Metadata
-                import_batch TEXT DEFAULT '',
-                created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS communications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                property_id INTEGER NOT NULL,
-                method TEXT NOT NULL,
-                direction TEXT DEFAULT 'outbound',
-                date_sent TEXT,
-                subject TEXT DEFAULT '',
-                body TEXT DEFAULT '',
-                response_received INTEGER DEFAULT 0,
-                response_date TEXT,
-                response_notes TEXT DEFAULT '',
-                created_at TEXT DEFAULT (datetime('now')),
-                FOREIGN KEY (property_id) REFERENCES properties(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS import_batches (
-                id TEXT PRIMARY KEY,
-                filename TEXT DEFAULT '',
-                row_count INTEGER DEFAULT 0,
-                imported_at TEXT DEFAULT (datetime('now')),
-                notes TEXT DEFAULT ''
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_properties_finding ON properties(finding);
-            CREATE INDEX IF NOT EXISTS idx_properties_detection ON properties(detection_label);
-            CREATE INDEX IF NOT EXISTS idx_properties_parcel ON properties(parcel_id);
-            CREATE INDEX IF NOT EXISTS idx_comms_property ON communications(property_id);
-            """
-        )
-
-        migration_columns = [
-            ("email", "TEXT DEFAULT ''"),
-            ("organization", "TEXT DEFAULT ''"),
-            ("purchase_type", "TEXT DEFAULT ''"),
-            ("compliance_1st_attempt", "TEXT DEFAULT ''"),
-            ("compliance_2nd_attempt", "TEXT DEFAULT ''"),
-            ("streetview_historical_path", "TEXT DEFAULT ''"),
-            ("streetview_historical_date", "TEXT DEFAULT ''"),
-            ("address_key", "TEXT DEFAULT ''"),
-        ]
-        for col_name, col_type in migration_columns:
+        for col_name, col_type in MIGRATION_COLUMNS:
             try:
-                await db.execute(f"ALTER TABLE properties ADD COLUMN {col_name} {col_type}")
+                if using_postgres():
+                    await db.execute(
+                        f"ALTER TABLE properties ADD COLUMN IF NOT EXISTS {col_name} {col_type}"
+                    )
+                else:
+                    await db.execute(f"ALTER TABLE properties ADD COLUMN {col_name} {col_type}")
             except Exception:
                 pass
 
@@ -318,6 +571,9 @@ async def init_db():
                 "UPDATE properties SET address_key = ? WHERE id = ?",
                 [build_address_key(row["address"]), row["id"]],
             )
+
+        if using_postgres():
+            await _ensure_postgis(db)
 
         await _dedupe_properties(db)
         await db.commit()

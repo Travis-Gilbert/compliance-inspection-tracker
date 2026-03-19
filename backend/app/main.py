@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from starlette.responses import StreamingResponse
 
-from app.models.database import init_db
+from app.models.database import connect_db, init_db
 from app.api.properties import router as properties_router
 from app.api.imagery import router as imagery_router
 from app.api.detection import router as detection_router
@@ -157,18 +157,14 @@ async def run_pipeline_all(batch_size: int = 100):
     """
     import asyncio
     import json as json_mod
-    import aiosqlite
     from datetime import datetime
     from starlette.responses import StreamingResponse
-    from app.config import DATABASE_PATH
 
     async def event_generator():
         def sse(data: dict) -> str:
             return f"data: {json_mod.dumps(data)}\n\n"
 
-        async with aiosqlite.connect(DATABASE_PATH) as db:
-            db.row_factory = aiosqlite.Row
-
+        async with connect_db() as db:
             # Count grand totals for each step
             cur = await db.execute("SELECT COUNT(*) FROM properties WHERE latitude IS NULL")
             total_geocode = (await cur.fetchone())[0]

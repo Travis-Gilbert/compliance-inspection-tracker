@@ -3,8 +3,6 @@ import json
 from datetime import datetime
 from typing import Awaitable, Callable, Optional
 
-import aiosqlite
-
 from app.config import (
     DATABASE_PATH,
     DETECTION_WORKERS,
@@ -12,6 +10,7 @@ from app.config import (
     IMAGERY_CONCURRENCY,
     PIPELINE_BATCH_SIZE,
 )
+from app.models.database import DatabaseConnection, connect_db
 from app.services.detector import batch_detect
 from app.services.geocoder import batch_geocode
 from app.services.imagery import batch_fetch_imagery
@@ -40,7 +39,7 @@ def _init_totals():
 
 
 async def _run_geocode_step(
-    db: aiosqlite.Connection,
+    db: DatabaseConnection,
     limit: int,
     cycle: int,
     emitter: PipelineEmitter,
@@ -93,7 +92,7 @@ async def _run_geocode_step(
 
 
 async def _run_imagery_step(
-    db: aiosqlite.Connection,
+    db: DatabaseConnection,
     limit: int,
     cycle: int,
     emitter: PipelineEmitter,
@@ -162,7 +161,7 @@ async def _run_imagery_step(
 
 
 async def _run_detection_step(
-    db: aiosqlite.Connection,
+    db: DatabaseConnection,
     limit: int,
     cycle: int,
     emitter: PipelineEmitter,
@@ -236,9 +235,7 @@ async def run_pipeline(
     totals = _init_totals()
     cycle_count = 0
 
-    async with aiosqlite.connect(DATABASE_PATH) as db:
-        db.row_factory = aiosqlite.Row
-
+    async with connect_db() as db:
         while True:
             cycle_count += 1
             cycle_processed = 0

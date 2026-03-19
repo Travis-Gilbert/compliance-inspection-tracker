@@ -20,6 +20,7 @@ SATELLITE_SIZE = os.getenv("SATELLITE_SIZE", "640x480")
 SATELLITE_ZOOM = int(os.getenv("SATELLITE_ZOOM", "19"))
 
 # Database
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 DATABASE_PATH = os.getenv("DATABASE_PATH", str(DATA_DIR / "compliance_tracker.db"))
 
 # Image cache

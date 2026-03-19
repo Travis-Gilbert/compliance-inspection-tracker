@@ -119,10 +119,28 @@ This project can run as two Railway services:
 Set the backend service to the `backend/` directory and provide:
 
 - `GOOGLE_MAPS_API_KEY`
-- your database connection env vars for Railway Postgres
+- `DATABASE_URL` for Postgres, or `DATABASE_PATH` for SQLite
 - `CORS_ORIGINS=https://your-frontend-domain`
 
 If you use multiple frontend domains, provide them as a comma-separated list.
+If `DATABASE_URL` is set, the backend uses Postgres automatically.
+
+### Postgres migration
+
+To copy a local SQLite tracker into Postgres:
+
+```bash
+cd backend
+python3 scripts/migrate_sqlite_to_postgres.py \
+  --sqlite-path ./data/compliance_tracker.db \
+  --database-url postgresql://...
+```
+
+This migrates properties, communications, and import batches. Cached imagery files stay on disk, so re-run imagery fetches or sync `IMAGE_CACHE_DIR` separately after the DB move.
+
+### PostGIS note
+
+The backend will attempt to enable PostGIS and add a spatial `location` column when the target database supports the extension. If the database host does not have the `postgis` package installed, startup continues without spatial columns.
 
 ### Frontend service
 

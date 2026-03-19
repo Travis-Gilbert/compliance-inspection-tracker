@@ -12,7 +12,12 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
 RUN npm run build
 
-FROM caddy:2-alpine
+FROM node:20-alpine AS runtime
 
-COPY Caddyfile /etc/caddy/Caddyfile
-COPY --from=build /app/dist /srv
+WORKDIR /app
+
+RUN npm install -g serve
+
+COPY --from=build /app/dist ./dist
+
+CMD ["sh", "-c", "serve -s dist -l tcp://0.0.0.0:${PORT:-3000}"]

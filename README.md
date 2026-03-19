@@ -112,7 +112,7 @@ Frontend runs on http://localhost:5173
 This project can run as two Railway services:
 
 - `backend`: FastAPI API
-- `frontend`: static React app served by Caddy
+- `frontend`: static React app served from the included Docker image
 
 ### Backend service
 
@@ -134,7 +134,7 @@ Set this env var on the frontend service:
 VITE_API_BASE_URL=https://your-backend-domain
 ```
 
-The included `Caddyfile` serves the built app with SPA fallback, so routes like
+The Docker image serves the built app with SPA fallback, so routes like
 `/review`, `/property/123`, and `/map` load correctly.
 
 ### Monorepo setup

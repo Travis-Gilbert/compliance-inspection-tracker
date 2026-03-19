@@ -4,6 +4,7 @@ import re
 import uuid
 from typing import Optional
 from app.models.property import PropertyCreate
+from app.utils.address import normalize_address
 
 
 # Column name patterns for auto-detection
@@ -17,6 +18,10 @@ COLUMN_PATTERNS = {
     "parcel_id": {
         "exact": ["parcel_id", "parcelid", "parcel_number", "parcel_no", "pin", "apn", "folio", "tax_id"],
         "contains": ["parcel"],
+    },
+    "city_state_zip": {
+        "exact": ["city_state_zip", "citystatezip", "city_state", "city_zip", "city"],
+        "contains": ["city_state_zip", "city_state", "city_zip"],
     },
     "buyer_name": {
         "exact": ["buyer_name", "buyer", "purchaser", "owner_name", "full_name"],
@@ -138,6 +143,18 @@ def strip_bom(text: str) -> str:
     return text
 
 
+def combine_address(address: str, city_state_zip: str = "") -> str:
+    """Combine split address fields from FileMaker-style exports."""
+    street = normalize_address(address)
+    locality = normalize_address(city_state_zip)
+
+    if not locality:
+        return street
+    if locality.lower() in street.lower():
+        return street
+    return normalize_address(f"{street}, {locality}")
+
+
 def parse_csv_text(text: str, filename: str = "") -> tuple[list[PropertyCreate], list[str], str]:
     """
     Parse CSV/TSV text into PropertyCreate objects.
@@ -200,7 +217,10 @@ def parse_csv_text(text: str, filename: str = "") -> tuple[list[PropertyCreate],
                     return val
                 return ""
 
-            address = get_col("address")
+            address = combine_address(
+                get_col("address"),
+                get_col("city_state_zip"),
+            )
             if not address:
                 errors.append(f"Row {row_num}: no address found, skipping")
                 continue

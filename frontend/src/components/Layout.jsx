@@ -33,7 +33,9 @@ export default function Layout({ children }) {
                 }`
               }
             >
-              <span className="text-base">{item.icon}</span>
+              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded bg-gray-100 px-1 text-[10px] font-semibold tracking-wide text-gray-500">
+                {item.shortLabel}
+              </span>
               {item.label}
             </NavLink>
           ))}
@@ -42,7 +44,7 @@ export default function Layout({ children }) {
         {/* API status indicator */}
         <div className="hidden md:block mt-auto p-4 border-t border-gray-100">
           <div className="text-xs text-gray-400">
-            Local tool. No database connection.
+            Local desk-research tool. Data stays in this tracker.
           </div>
         </div>
       </nav>

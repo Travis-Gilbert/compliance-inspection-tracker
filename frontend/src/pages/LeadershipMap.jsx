@@ -123,6 +123,23 @@ export default function LeadershipMap() {
   const [contactFilter, setContactFilter] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [historicalState, setHistoricalState] = useState({});
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth < 640 : false
+  );
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 639px)");
+    const handleChange = () => setIsMobile(mediaQuery.matches);
+
+    handleChange();
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
 
   const loadMap = async () => {
     setLoading(true);
@@ -134,11 +151,15 @@ export default function LeadershipMap() {
       const response = await getMapProperties(params);
       const rows = response.properties || [];
       setProperties(rows);
-      if (rows.length === 0) {
-        setSelectedId(null);
-      } else if (!rows.some((row) => row.id === selectedId)) {
-        setSelectedId(rows[0].id);
-      }
+      setSelectedId((current) => {
+        if (rows.length === 0) {
+          return null;
+        }
+        if (current && rows.some((row) => row.id === current)) {
+          return current;
+        }
+        return isMobile ? null : rows[0].id;
+      });
     } catch (err) {
       setError(err.message || "Failed to load map data");
     } finally {
@@ -149,7 +170,7 @@ export default function LeadershipMap() {
   useEffect(() => {
     loadMap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [programFilter, contactFilter]);
+  }, [programFilter, contactFilter, isMobile]);
 
   const selectedProperty = useMemo(
     () => properties.find((row) => row.id === selectedId) || null,
@@ -228,19 +249,19 @@ export default function LeadershipMap() {
   return (
     <div className="fixed inset-0 bg-warm-50">
       <div className="absolute top-0 left-0 right-0 z-[1000] bg-white/95 border-b border-gray-200 backdrop-blur-sm">
-        <div className="px-4 py-3 flex items-center gap-4 flex-wrap">
+        <div className="px-4 py-3 flex flex-wrap items-start gap-3">
           <div>
             <h2 className="font-heading text-base font-bold text-gray-900">Compliance Map</h2>
             <p className="text-xs text-gray-500">Leadership view for geocoded properties</p>
           </div>
 
-          <div className="flex items-center gap-3 text-xs text-gray-600">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
             <span>Total: <strong className="text-gray-900">{stats.total}</strong></span>
             <span>High priority: <strong className="text-red-700">{stats.highPriority}</strong></span>
             <span>No outreach: <strong className="text-orange-700">{stats.noContact}</strong></span>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
             <Link
               to="/review"
               className="text-xs font-medium px-3 py-1.5 rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
@@ -284,7 +305,7 @@ export default function LeadershipMap() {
         </div>
       </div>
 
-      <div className="absolute inset-0 pt-[74px]">
+      <div className="absolute inset-0 pt-[124px] sm:pt-[74px]">
         <MapContainer center={MAP_CENTER} zoom={MAP_ZOOM} className="w-full h-full" zoomControl>
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FlyToSelected property={selectedProperty} />
@@ -311,14 +332,20 @@ export default function LeadershipMap() {
       </div>
 
       {loading && (
-        <div className="absolute top-[84px] left-4 z-[1000] bg-white border border-gray-200 rounded px-3 py-2 text-xs text-gray-600">
+        <div className="absolute left-4 top-[134px] z-[1000] rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 sm:top-[84px]">
           Loading map data...
         </div>
       )}
 
       {error && (
-        <div className="absolute top-[84px] left-4 z-[1000] bg-red-50 border border-red-200 rounded px-3 py-2 text-xs text-red-700">
+        <div className="absolute left-4 top-[134px] z-[1000] rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:top-[84px]">
           {error}
+        </div>
+      )}
+
+      {!loading && !error && properties.length === 0 && (
+        <div className="absolute left-4 top-[134px] z-[1000] rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 sm:top-[84px]">
+          No geocoded properties match this view.
         </div>
       )}
 
@@ -327,7 +354,13 @@ export default function LeadershipMap() {
       </div>
 
       {selectedProperty && (
-        <aside className="absolute top-[74px] right-0 bottom-0 w-full sm:w-[430px] bg-white border-l border-gray-200 z-[1100] overflow-y-auto shadow-xl">
+        <aside
+          className={`absolute z-[1100] overflow-y-auto bg-white shadow-xl ${
+            isMobile
+              ? "bottom-0 left-0 right-0 h-[78vh] rounded-t-2xl border-t border-gray-200"
+              : "bottom-0 right-0 top-[74px] w-[430px] border-l border-gray-200"
+          }`}
+        >
           <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-start justify-between gap-3">
             <div>
               <h3 className="font-heading text-lg font-bold text-gray-900 leading-tight">

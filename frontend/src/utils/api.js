@@ -1,13 +1,22 @@
-const BASE = "";  // Vite proxy handles /api routing
+const rawBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const BASE = rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
+
+function buildUrl(path) {
+  return `${BASE}${path}`;
+}
+
+async function getErrorMessage(res, fallback = `API error: ${res.status}`) {
+  const err = await res.json().catch(() => ({ detail: res.statusText }));
+  return err.detail || fallback;
+}
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(buildUrl(path), {
     headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `API error: ${res.status}`);
+    throw new Error(await getErrorMessage(res, `API error: ${res.status}`));
   }
   return res;
 }
@@ -59,22 +68,22 @@ export const batchUpdateProperties = (propertyIds, finding, notes = "") =>
 export const importCSV = async (file) => {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch("/api/properties/import", {
+  const res = await fetch(buildUrl("/api/properties/import"), {
     method: "POST",
     body: formData,
   });
-  if (!res.ok) throw new Error("Import failed");
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Import failed"));
   return res.json();
 };
 
 export const importCSVText = async (text) => {
   const formData = new FormData();
   formData.append("text", text);
-  const res = await fetch("/api/properties/import", {
+  const res = await fetch(buildUrl("/api/properties/import"), {
     method: "POST",
     body: formData,
   });
-  if (!res.ok) throw new Error("Import failed");
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Import failed"));
   return res.json();
 };
 
@@ -95,7 +104,7 @@ export const fetchHistoricalImagery = (propertyId) =>
   request(`/api/imagery/fetch-historical/${propertyId}`, { method: "POST" }).then(r => r.json());
 
 export const getImageUrl = (propertyId, type) =>
-  `/api/imagery/image/${propertyId}/${type}`;
+  buildUrl(`/api/imagery/image/${propertyId}/${type}`);
 
 // Detection
 export const runDetectionBatch = (limit = 50) =>
@@ -121,7 +130,7 @@ export const runPipelineStream = (limit = 25, onEvent, { processAll = false } = 
     process_all: processAll ? "true" : "false",
   }).toString();
   const run = async () => {
-    const res = await fetch(`/api/pipeline/process-stream?${qs}`, {
+    const res = await fetch(buildUrl(`/api/pipeline/process-stream?${qs}`), {
       method: "POST",
       signal: controller.signal,
     });
@@ -153,7 +162,7 @@ export const runPipelineStream = (limit = 25, onEvent, { processAll = false } = 
 export const runPipelineAll = (batchSize = 100, onEvent) => {
   const controller = new AbortController();
   const run = async () => {
-    const res = await fetch(`/api/pipeline/process-all?batch_size=${batchSize}`, {
+    const res = await fetch(buildUrl(`/api/pipeline/process-all?batch_size=${batchSize}`), {
       method: "POST",
       signal: controller.signal,
     });
@@ -194,11 +203,14 @@ export const createComm = (data) =>
 // Export
 export const exportCSVUrl = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
-  return `/api/properties/export/csv?${qs}`;
+  return buildUrl(`/api/properties/export/csv?${qs}`);
 };
 
 export const exportInspectionListUrl = () =>
-  "/api/properties/export/inspection-list";
+  buildUrl("/api/properties/export/inspection-list");
+
+export const exportResolvedCsvUrl = () =>
+  buildUrl("/api/properties/export/resolved");
 
 export const exportSummaryUrl = () =>
-  "/api/properties/export/summary";
+  buildUrl("/api/properties/export/summary");

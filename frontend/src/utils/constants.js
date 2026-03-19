@@ -31,9 +31,42 @@ export const RESOLVED_FINDINGS = [
 ];
 
 export const NAV_ITEMS = [
-  { path: "/", label: "Dashboard", icon: "📊" },
-  { path: "/review", label: "Review Queue", icon: "📋" },
-  { path: "/map", label: "Compliance Map", icon: "M" },
-  { path: "/import", label: "Import", icon: "📥" },
-  { path: "/export", label: "Export", icon: "📤" },
+  { path: "/", label: "Dashboard", shortLabel: "DB" },
+  { path: "/review", label: "Review Queue", shortLabel: "RQ" },
+  { path: "/map", label: "Compliance Map", shortLabel: "MP" },
+  { path: "/import", label: "Import", shortLabel: "IM" },
+  { path: "/export", label: "Export", shortLabel: "EX" },
+];
+
+export const REVIEW_FAST_LANES = [
+  {
+    id: "unreviewed",
+    label: "Unreviewed First",
+    description: "Work the full open queue by compliance priority.",
+    params: { filter: "unreviewed", sort: "priority" },
+  },
+  {
+    id: "likely_demolished",
+    label: "Likely Demolished",
+    description: "Start with the most urgent structure-loss signals.",
+    params: { filter: "unreviewed", detection: "likely_demolished", sort: "detection_score" },
+  },
+  {
+    id: "likely_vacant",
+    label: "Likely Vacant",
+    description: "Move through vacancy cases while detections are still fresh.",
+    params: { filter: "unreviewed", detection: "likely_vacant", sort: "detection_score" },
+  },
+  {
+    id: "needs_inspection",
+    label: "Needs Inspection",
+    description: "Review anything already marked for a field visit.",
+    params: { filter: "inconclusive", sort: "priority" },
+  },
+  {
+    id: "unprocessed",
+    label: "Not Processed",
+    description: "Find properties still waiting on imagery or detection.",
+    params: { filter: "unreviewed", detection: "unprocessed", sort: "created_at" },
+  },
 ];

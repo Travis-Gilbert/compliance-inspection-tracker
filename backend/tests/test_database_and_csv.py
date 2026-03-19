@@ -5,8 +5,9 @@ from unittest.mock import patch
 
 import aiosqlite
 
+from app.api.properties import import_csv as import_csv_endpoint
 from app.models.database import init_db
-from app.services.csv_parser import parse_csv_text
+from app.services.csv_parser import combine_address, parse_csv_text
 from app.services.exporter import export_properties_csv
 
 
@@ -67,6 +68,16 @@ CREATE TABLE IF NOT EXISTS import_batches (
 
 
 class TestDatabaseAndCsv(unittest.IsolatedAsyncioTestCase):
+    def test_combine_address_uses_city_state_zip_when_present(self):
+        self.assertEqual(
+            combine_address("11086 SEYMOUR RD", "GAINES, MI 48436"),
+            "11086 SEYMOUR Rd, GAINES, MI 48436",
+        )
+        self.assertEqual(
+            combine_address("307 Mason St, Flint, MI 48503", "FLINT, MI 48503"),
+            "307 Mason St, Flint, MI 48503",
+        )
+
     async def test_migration_adds_new_columns_without_reset(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = Path(temp_dir) / "tracker.db"
@@ -85,6 +96,7 @@ class TestDatabaseAndCsv(unittest.IsolatedAsyncioTestCase):
                 columns = {row[1] for row in await cursor.fetchall()}
 
             expected = {
+                "address_key",
                 "email",
                 "organization",
                 "purchase_type",
@@ -94,6 +106,52 @@ class TestDatabaseAndCsv(unittest.IsolatedAsyncioTestCase):
                 "streetview_historical_date",
             }
             self.assertTrue(expected.issubset(columns))
+
+    async def test_import_merges_existing_properties_by_parcel_or_address(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "tracker.db"
+            with (
+                patch("app.config.DATABASE_PATH", str(db_path)),
+                patch("app.models.database.DATABASE_PATH", str(db_path)),
+            ):
+                await init_db()
+
+                async with aiosqlite.connect(db_path) as db:
+                    db.row_factory = aiosqlite.Row
+
+                    first = await import_csv_endpoint(
+                        file=None,
+                        text=(
+                            "address,parcel_id,buyer_name,program\n"
+                            "307 Mason St,41-06-538-004,John Smith,Featured Homes\n"
+                        ),
+                        db=db,
+                    )
+                    second = await import_csv_endpoint(
+                        file=None,
+                        text=(
+                            "address,parcel_id,email,organization\n"
+                            "307 Mason Street,41-06-538-004,john@example.org,Mason Dev LLC\n"
+                        ),
+                        db=db,
+                    )
+
+                    cursor = await db.execute("SELECT COUNT(*) AS n FROM properties")
+                    count = (await cursor.fetchone())["n"]
+                    self.assertEqual(count, 1)
+
+                    cursor = await db.execute(
+                        "SELECT address, buyer_name, email, organization, address_key FROM properties"
+                    )
+                    row = await cursor.fetchone()
+
+                self.assertEqual(first.inserted, 1)
+                self.assertEqual(second.updated, 1)
+                self.assertEqual(row["address"], "307 Mason St")
+                self.assertEqual(row["buyer_name"], "John Smith")
+                self.assertEqual(row["email"], "john@example.org")
+                self.assertEqual(row["organization"], "Mason Dev LLC")
+                self.assertTrue(row["address_key"])
 
     async def test_csv_parser_maps_new_fields_and_export_includes_them(self):
         csv_text = (
@@ -133,6 +191,17 @@ class TestDatabaseAndCsv(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Purchase Type", csv_out)
         self.assertIn("Compliance 1st Attempt", csv_out)
         self.assertIn("john@example.org", csv_out)
+
+    async def test_csv_parser_combines_city_state_zip_into_address(self):
+        csv_text = (
+            "address,city_state_zip\n"
+            "11086 SEYMOUR RD,\"GAINES, MI 48436\"\n"
+        )
+
+        properties, errors, _ = parse_csv_text(csv_text, "import.csv")
+        self.assertEqual(errors, [])
+        self.assertEqual(len(properties), 1)
+        self.assertEqual(properties[0].address, "11086 SEYMOUR Rd, GAINES, MI 48436")
 
 
 if __name__ == "__main__":

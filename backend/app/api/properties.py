@@ -19,6 +19,7 @@ from app.services.enrichment import (
     haversine_clusters,
     summarize_buyers,
 )
+from app.utils.address import build_address_key
 
 router = APIRouter(prefix="/api/properties", tags=["properties"])
 
@@ -26,6 +27,82 @@ router = APIRouter(prefix="/api/properties", tags=["properties"])
 def row_to_dict(row) -> dict:
     """Convert an aiosqlite Row to a dict."""
     return dict(row)
+
+
+def resolved_values_sql() -> str:
+    return ", ".join(f"'{f.value}'" for f in RESOLVED_FINDINGS)
+
+
+async def find_existing_property(db: aiosqlite.Connection, prop: PropertyCreate):
+    parcel_id = (prop.parcel_id or "").strip()
+    if parcel_id:
+        cursor = await db.execute(
+            "SELECT id, address, address_key, parcel_id FROM properties WHERE parcel_id = ? LIMIT 1",
+            [parcel_id],
+        )
+        row = await cursor.fetchone()
+        if row:
+            return dict(row)
+
+    address_key = build_address_key(prop.address)
+    if not address_key:
+        return None
+
+    cursor = await db.execute(
+        "SELECT id, address, address_key, parcel_id FROM properties WHERE address_key = ? LIMIT 1",
+        [address_key],
+    )
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def merge_import_property(
+    db: aiosqlite.Connection,
+    property_id: int,
+    prop: PropertyCreate,
+    batch_id: str,
+):
+    await db.execute(
+        """
+        UPDATE properties
+        SET address = COALESCE(NULLIF(?, ''), address),
+            address_key = COALESCE(NULLIF(?, ''), address_key),
+            parcel_id = COALESCE(NULLIF(?, ''), parcel_id),
+            buyer_name = COALESCE(NULLIF(?, ''), buyer_name),
+            program = COALESCE(NULLIF(?, ''), program),
+            closing_date = COALESCE(NULLIF(?, ''), closing_date),
+            commitment = COALESCE(NULLIF(?, ''), commitment),
+            email = COALESCE(NULLIF(?, ''), email),
+            organization = COALESCE(NULLIF(?, ''), organization),
+            purchase_type = COALESCE(NULLIF(?, ''), purchase_type),
+            compliance_1st_attempt = COALESCE(NULLIF(?, ''), compliance_1st_attempt),
+            compliance_2nd_attempt = COALESCE(NULLIF(?, ''), compliance_2nd_attempt),
+            streetview_historical_path = COALESCE(NULLIF(?, ''), streetview_historical_path),
+            streetview_historical_date = COALESCE(NULLIF(?, ''), streetview_historical_date),
+            import_batch = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        [
+            prop.address,
+            build_address_key(prop.address),
+            prop.parcel_id,
+            prop.buyer_name,
+            prop.program,
+            prop.closing_date,
+            prop.commitment,
+            prop.email,
+            prop.organization,
+            prop.purchase_type,
+            prop.compliance_1st_attempt,
+            prop.compliance_2nd_attempt,
+            prop.streetview_historical_path,
+            prop.streetview_historical_date,
+            batch_id,
+            datetime.now().isoformat(),
+            property_id,
+        ],
+    )
 
 
 # --- List & Filter ---
@@ -207,6 +284,7 @@ async def get_property_clusters(
 async def get_priority_queue(
     filter: str = Query("all"),
     program: str = Query(None),
+    detection: str = None,
     search: str = Query(None),
     sort: str = Query("priority"),
     order: str = Query("desc"),
@@ -225,14 +303,17 @@ async def get_priority_queue(
     elif filter == "inconclusive":
         conditions.append("finding = 'inconclusive'")
     elif filter == "resolved":
-        resolved_values = ", ".join(f"'{f.value}'" for f in RESOLVED_FINDINGS)
-        conditions.append(f"finding IN ({resolved_values})")
+        conditions.append(f"finding IN ({resolved_values_sql()})")
     elif filter == "reviewed":
         conditions.append("(finding != '' AND finding IS NOT NULL)")
 
     if program:
         conditions.append("program = ?")
         params.append(program)
+
+    if detection:
+        conditions.append("detection_label = ?")
+        params.append(detection)
 
     if search:
         conditions.append("(address LIKE ? OR parcel_id LIKE ? OR buyer_name LIKE ? OR organization LIKE ? OR email LIKE ?)")
@@ -298,13 +379,14 @@ async def get_property(property_id: int, db: aiosqlite.Connection = Depends(get_
 async def create_property(prop: PropertyCreate, db: aiosqlite.Connection = Depends(get_db)):
     cursor = await db.execute("""
         INSERT INTO properties (
-            address, parcel_id, buyer_name, program, closing_date, commitment,
+            address, address_key, parcel_id, buyer_name, program, closing_date, commitment,
             email, organization, purchase_type, compliance_1st_attempt, compliance_2nd_attempt,
             streetview_historical_path, streetview_historical_date
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [
         prop.address,
+        build_address_key(prop.address),
         prop.parcel_id,
         prop.buyer_name,
         prop.program,
@@ -341,10 +423,13 @@ async def update_property(
         fields.append(f"{field} = ?")
         values.append(value)
 
-    # Auto-set reviewed_at when finding is set
-    if "finding" in update_data and update_data["finding"]:
+    if "address" in update_data:
+        fields.append("address_key = ?")
+        values.append(build_address_key(update_data["address"]))
+
+    if "finding" in update_data:
         fields.append("reviewed_at = ?")
-        values.append(datetime.now().isoformat())
+        values.append(datetime.now().isoformat() if update_data["finding"] else None)
 
     fields.append("updated_at = ?")
     values.append(datetime.now().isoformat())
@@ -387,7 +472,7 @@ async def batch_update_properties(req: BatchUpdateRequest, db: aiosqlite.Connect
         await db.execute("""
             UPDATE properties SET finding=?, reviewed_at=?, updated_at=?
             WHERE id=?
-        """, [req.finding, now, now, pid])
+        """, [req.finding, now if req.finding else None, now, pid])
         if req.notes:
             await db.execute("""
                 UPDATE properties SET notes=CASE
@@ -423,40 +508,48 @@ async def import_csv(
     if not properties and errors:
         raise HTTPException(status_code=400, detail=f"Parse errors: {'; '.join(errors[:5])}")
 
+    total_rows = len(properties) + len(errors)
+
     # Insert batch record
     await db.execute(
         "INSERT INTO import_batches (id, filename, row_count) VALUES (?, ?, ?)",
-        [batch_id, filename, len(properties)],
+        [batch_id, filename, total_rows],
     )
 
-    # Insert properties
-    imported = 0
+    inserted = 0
+    updated = 0
     for prop in properties:
         try:
-            await db.execute("""
-                INSERT INTO properties (
-                    address, parcel_id, buyer_name, program, closing_date, commitment,
-                    email, organization, purchase_type, compliance_1st_attempt, compliance_2nd_attempt,
-                    streetview_historical_path, streetview_historical_date, import_batch
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                prop.address,
-                prop.parcel_id,
-                prop.buyer_name,
-                prop.program,
-                prop.closing_date,
-                prop.commitment,
-                prop.email,
-                prop.organization,
-                prop.purchase_type,
-                prop.compliance_1st_attempt,
-                prop.compliance_2nd_attempt,
-                prop.streetview_historical_path,
-                prop.streetview_historical_date,
-                batch_id,
-            ])
-            imported += 1
+            existing = await find_existing_property(db, prop)
+            if existing:
+                await merge_import_property(db, existing["id"], prop, batch_id)
+                updated += 1
+            else:
+                await db.execute("""
+                    INSERT INTO properties (
+                        address, address_key, parcel_id, buyer_name, program, closing_date, commitment,
+                        email, organization, purchase_type, compliance_1st_attempt, compliance_2nd_attempt,
+                        streetview_historical_path, streetview_historical_date, import_batch
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    prop.address,
+                    build_address_key(prop.address),
+                    prop.parcel_id,
+                    prop.buyer_name,
+                    prop.program,
+                    prop.closing_date,
+                    prop.commitment,
+                    prop.email,
+                    prop.organization,
+                    prop.purchase_type,
+                    prop.compliance_1st_attempt,
+                    prop.compliance_2nd_attempt,
+                    prop.streetview_historical_path,
+                    prop.streetview_historical_date,
+                    batch_id,
+                ])
+                inserted += 1
         except Exception as e:
             errors.append(f"Insert error for {prop.address}: {str(e)}")
 
@@ -464,9 +557,11 @@ async def import_csv(
 
     return ImportResult(
         batch_id=batch_id,
-        total_rows=len(properties) + len(errors),
-        imported=imported,
-        skipped=len(properties) - imported,
+        total_rows=total_rows,
+        imported=inserted + updated,
+        inserted=inserted,
+        updated=updated,
+        skipped=len(errors),
         errors=errors[:10],
     )
 
@@ -482,12 +577,18 @@ async def get_stats(db: aiosqlite.Connection = Depends(get_db)):
     cursor = await db.execute("SELECT COUNT(*) as n FROM properties WHERE finding != '' AND finding IS NOT NULL")
     reviewed = (await cursor.fetchone())["n"]
 
-    resolved_values = ", ".join(f"'{f.value}'" for f in RESOLVED_FINDINGS)
+    resolved_values = resolved_values_sql()
     cursor = await db.execute(f"SELECT COUNT(*) as n FROM properties WHERE finding IN ({resolved_values})")
     resolved = (await cursor.fetchone())["n"]
 
     cursor = await db.execute("SELECT COUNT(*) as n FROM properties WHERE finding = 'inconclusive'")
     needs_inspection = (await cursor.fetchone())["n"]
+
+    cursor = await db.execute("""
+        SELECT COUNT(*) as n FROM properties
+        WHERE finding = 'inconclusive' OR detection_label IN ('likely_vacant', 'likely_demolished')
+    """)
+    inspection_candidates = (await cursor.fetchone())["n"]
 
     cursor = await db.execute("SELECT COUNT(*) as n FROM properties WHERE latitude IS NOT NULL")
     geocoded = (await cursor.fetchone())["n"]
@@ -518,18 +619,30 @@ async def get_stats(db: aiosqlite.Connection = Depends(get_db)):
     """)
     by_detection = {row["detection_label"]: row["n"] for row in await cursor.fetchall()}
 
+    cursor = await db.execute("""
+        SELECT detection_label, COUNT(*) as n FROM properties
+        WHERE (finding = '' OR finding IS NULL)
+          AND detection_label != '' AND detection_label IS NOT NULL
+        GROUP BY detection_label
+    """)
+    unreviewed_by_detection = {
+        row["detection_label"]: row["n"] for row in await cursor.fetchall()
+    }
+
     return StatsResponse(
         total=total,
         unreviewed=total - reviewed,
         reviewed=reviewed,
         resolved=resolved,
         needs_inspection=needs_inspection,
+        inspection_candidates=inspection_candidates,
         geocoded=geocoded,
         imagery_fetched=imagery_fetched,
         detection_ran=detection_ran,
         by_finding=by_finding,
         by_program=by_program,
         by_detection=by_detection,
+        unreviewed_by_detection=unreviewed_by_detection,
         percent_reviewed=round(reviewed / total * 100, 1) if total > 0 else 0,
     )
 
@@ -575,6 +688,22 @@ async def export_csv(
         content=csv_text,
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=compliance-export-{datetime.now().strftime('%Y%m%d')}.csv"},
+    )
+
+
+@router.get("/export/resolved")
+async def export_resolved(db: aiosqlite.Connection = Depends(get_db)):
+    """Export properties resolved through desk research."""
+    resolved_values = resolved_values_sql()
+    cursor = await db.execute(
+        f"SELECT * FROM properties WHERE finding IN ({resolved_values}) ORDER BY address"
+    )
+    rows = await cursor.fetchall()
+    csv_text = export_properties_csv([dict(r) for r in rows])
+    return PlainTextResponse(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=resolved-properties-{datetime.now().strftime('%Y%m%d')}.csv"},
     )
 
 

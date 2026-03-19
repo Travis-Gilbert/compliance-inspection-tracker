@@ -13,7 +13,7 @@ from app.api.properties import router as properties_router
 from app.api.imagery import router as imagery_router
 from app.api.detection import router as detection_router
 from app.api.comms import router as comms_router
-from app.config import IMAGE_CACHE_DIR, PIPELINE_BATCH_SIZE
+from app.config import CORS_ORIGINS, IMAGE_CACHE_DIR, PIPELINE_BATCH_SIZE
 from app.services.pipeline import run_pipeline as run_pipeline_service
 
 
@@ -31,15 +31,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS for React frontend dev server
+# CORS for frontend clients
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",    # Vite dev server
-        "http://localhost:3000",    # Alternate dev port
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

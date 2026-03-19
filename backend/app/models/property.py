@@ -117,12 +117,14 @@ class StatsResponse(BaseModel):
     reviewed: int = 0
     resolved: int = 0
     needs_inspection: int = 0
+    inspection_candidates: int = 0
     geocoded: int = 0
     imagery_fetched: int = 0
     detection_ran: int = 0
     by_finding: dict = Field(default_factory=dict)
     by_program: dict = Field(default_factory=dict)
     by_detection: dict = Field(default_factory=dict)
+    unreviewed_by_detection: dict = Field(default_factory=dict)
     percent_reviewed: float = 0.0
 
 
@@ -130,5 +132,7 @@ class ImportResult(BaseModel):
     batch_id: str
     total_rows: int
     imported: int
+    inserted: int = 0
+    updated: int = 0
     skipped: int
     errors: list[str] = Field(default_factory=list)

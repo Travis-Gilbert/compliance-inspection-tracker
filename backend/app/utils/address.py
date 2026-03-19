@@ -36,8 +36,20 @@ def normalize_address(address: str) -> str:
     addr = re.sub(r"\b(S|s)\.?\s", "S ", addr)
     addr = re.sub(r"\b(E|e)\.?\s", "E ", addr)
     addr = re.sub(r"\b(W|w)\.?\s", "W ", addr)
+    # Standardize common street suffixes
+    for raw_value, standard_value in STREET_ABBREVIATIONS.items():
+        addr = re.sub(rf"\b{re.escape(raw_value)}\b", standard_value, addr, flags=re.IGNORECASE)
 
     return addr
+
+
+def build_address_key(address: str) -> str:
+    """
+    Build a normalized lookup key for matching repeated imports.
+    """
+    normalized = normalize_address(address).lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def build_full_address(address: str, city: str = "Flint", state: str = "MI") -> str:

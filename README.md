@@ -107,6 +107,41 @@ npm run dev
 Backend runs on http://localhost:8000
 Frontend runs on http://localhost:5173
 
+## Railway Deployment
+
+This project can run as two Railway services:
+
+- `backend`: FastAPI API
+- `frontend`: static React app served by Caddy
+
+### Backend service
+
+Set the backend service to the `backend/` directory and provide:
+
+- `GOOGLE_MAPS_API_KEY`
+- your database connection env vars for Railway Postgres
+- `CORS_ORIGINS=https://your-frontend-domain`
+
+If you use multiple frontend domains, provide them as a comma-separated list.
+
+### Frontend service
+
+Set the frontend service to the `frontend/` directory and use the included `Dockerfile`.
+
+Set this env var on the frontend service:
+
+```bash
+VITE_API_BASE_URL=https://your-backend-domain
+```
+
+The included `Caddyfile` serves the built app with SPA fallback, so routes like
+`/review`, `/property/123`, and `/map` load correctly.
+
+### Monorepo setup
+
+In Railway, create one service from `backend/` and one from `frontend/`.
+Point the frontend service at the backend's public URL via `VITE_API_BASE_URL`.
+
 ## Workflow
 
 1. Export non-respondent properties from FileMaker as CSV

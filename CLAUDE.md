@@ -180,7 +180,7 @@ All findings except `inconclusive` are considered "resolved" (desk-resolved, no 
 ## Hard Rules
 
 1. **Never connect to FileMaker.** No Data API, no sessions, no field mapping. CSV-in, CSV-out only.
-2. **Never deploy publicly.** No Vercel, no Railway. This runs locally.
+2. **Internet deployment is allowed if architecture supports it.** The hard constraint is no direct connection to FileMaker or any GCLBA system; keep the app CSV-in, CSV-out.
 3. **Never add user authentication.** Single-user local tool.
 4. **Never use marketing language in the UI.** No "Powered by AI," no "Welcome to." Government tool, plain copy.
 5. **Never overstate detection.** Labels are "likely" not "confirmed." Detection triages, humans assess.

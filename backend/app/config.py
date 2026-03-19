@@ -4,6 +4,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _split_csv_env(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 # Base paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -35,6 +39,15 @@ PIPELINE_BATCH_SIZE = int(os.getenv("PIPELINE_BATCH_SIZE", "100"))
 # Server
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
+
+# CORS
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+CORS_ORIGINS = _split_csv_env(os.getenv("CORS_ORIGINS", "")) or DEFAULT_CORS_ORIGINS
 
 # Google Maps API endpoints
 STREETVIEW_URL = "https://maps.googleapis.com/maps/api/streetview"

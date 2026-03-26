@@ -1,0 +1,28 @@
+# Core
+django>=5.1,<6.0
+django-ninja>=1.3,<2.0
+django-environ>=0.11,<1.0
+django-cors-headers>=4.4,<5.0
+whitenoise>=6.7,<7.0
+
+# Database
+psycopg2-binary>=2.9,<3.0
+dj-database-url>=2.2,<3.0
+
+# HTTP client (async for Google API calls)
+httpx>=0.28,<1.0
+
+# Data processing
+pandas>=2.2,<3.0
+pydantic>=2.10,<3.0
+
+# Image analysis
+Pillow>=11.0,<12.0
+numpy>=2.1,<3.0
+
+# Address parsing
+usaddress>=0.5,<1.0
+
+# ASGI server
+gunicorn>=22.0,<24.0
+uvicorn[standard]>=0.30,<1.0

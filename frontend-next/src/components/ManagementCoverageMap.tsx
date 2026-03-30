@@ -5,7 +5,22 @@ import Link from "next/link";
 import "leaflet/dist/leaflet.css";
 import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from "react-leaflet";
 import { fetchHistoricalImagery, getImageUrl } from "@/lib/api";
-import { DETECTION_LABELS, FINDINGS } from "@/lib/constants";
+import { COMPLIANCE_STATUSES, DETECTION_LABELS, FINDINGS } from "@/lib/constants";
+
+const COMPLIANCE_PIN_COLORS: Record<string, string> = {
+  compliant: "#2E7D32",
+  in_progress: "#1565C0",
+  needs_outreach: "#F57F17",
+  non_compliant: "#E65100",
+  unknown: "#9E9E9E",
+};
+
+function getPinColor(property: any): string {
+  if (property.compliance_status && property.compliance_status !== "unknown") {
+    return COMPLIANCE_PIN_COLORS[property.compliance_status] || "#9E9E9E";
+  }
+  return "#9E9E9E";
+}
 
 const MAP_CENTER: [number, number] = [43.011, -83.687];
 const MAP_ZOOM = 11;
@@ -320,7 +335,7 @@ export default function ManagementCoverageMap({
       </div>
 
       <div className="grid lg:grid-cols-[minmax(0,1.7fr)_380px]">
-        <div className="relative min-h-[460px] border-b border-gray-200 lg:border-b-0 lg:border-r">
+        <div className="relative min-h-[500px] border-b border-gray-200 lg:border-b-0 lg:border-r">
           {loading ? (
             <div className="flex h-full items-center justify-center bg-gray-50 text-sm text-gray-500">
               Loading county coverage map...
@@ -338,7 +353,7 @@ export default function ManagementCoverageMap({
               <MapContainer
                 center={MAP_CENTER}
                 zoom={MAP_ZOOM}
-                className="h-[460px] w-full"
+                className="h-[500px] w-full"
                 zoomControl
               >
                 <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
@@ -372,9 +387,9 @@ export default function ManagementCoverageMap({
                         center={center}
                         radius={isActive ? 8 : 5}
                         pathOptions={{
-                          color: isActive ? "#FFFFFF" : coverage.color,
+                          color: isActive ? "#FFFFFF" : getPinColor(property),
                           weight: isActive ? 2 : 1,
-                          fillColor: coverage.color,
+                          fillColor: getPinColor(property),
                           fillOpacity: 0.92,
                         }}
                         eventHandlers={{
@@ -405,7 +420,7 @@ export default function ManagementCoverageMap({
           )}
         </div>
 
-        <div className="flex min-h-[460px] flex-col bg-white">
+        <div className="flex min-h-[500px] flex-col bg-white">
           {activeProperty ? (
             <>
               <div className="border-b border-gray-200 px-4 py-4">
@@ -458,22 +473,56 @@ export default function ManagementCoverageMap({
                     <div className="mb-2 uppercase tracking-wide text-[10px] text-gray-400">
                       Detection
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
                       <span>{activeDetection.label}</span>
-                      <strong>{activeProperty.detection_score ?? "n/a"}</strong>
+                      {activeProperty.detection_score != null && (
+                        <>
+                          <div className="h-1.5 flex-1 rounded-full bg-gray-200">
+                            <div
+                              className="h-1.5 rounded-full"
+                              style={{
+                                width: `${Math.round(activeProperty.detection_score * 100)}%`,
+                                backgroundColor: activeDetection.color,
+                              }}
+                            />
+                          </div>
+                          <span className="text-[11px] text-gray-500">
+                            {activeProperty.detection_score.toFixed(2)} ({activeProperty.detection_score < 0.3 ? "low" : activeProperty.detection_score < 0.6 ? "moderate" : "high"})
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
 
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href={`/review?selected=${activeProperty.id}`}
+                    className="rounded bg-civic-green px-2.5 py-1.5 text-xs font-medium text-white hover:bg-civic-green-light"
+                  >
+                    Review this property
+                  </Link>
+                  <Link
+                    href={`/property/${activeProperty.id}`}
+                    className="rounded border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Open record
+                  </Link>
+                  {activeProperty.latitude && (
+                    <a
+                      href={`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${activeProperty.latitude},${activeProperty.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                    >
+                      Street View
+                    </a>
+                  )}
+                </div>
+
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <div className="text-xs uppercase tracking-wide text-gray-400">Before and After</div>
-                    <Link
-                      href={`/property/${activeProperty.id}`}
-                      className="text-xs font-medium text-civic-green hover:underline"
-                    >
-                      Open record
-                    </Link>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <ImagePanel

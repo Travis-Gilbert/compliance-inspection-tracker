@@ -36,6 +36,7 @@ export const NAV_ITEMS = [
   { path: "/map", label: "Compliance Map", shortLabel: "MP" },
   { path: "/import", label: "Import", shortLabel: "IM" },
   { path: "/export", label: "Export", shortLabel: "EX" },
+  { path: "/processing", label: "Processing", shortLabel: "PR" },
 ];
 
 export const REVIEW_FAST_LANES = [

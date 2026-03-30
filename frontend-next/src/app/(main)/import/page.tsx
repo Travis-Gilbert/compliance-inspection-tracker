@@ -223,18 +223,40 @@ export default function ImportPage() {
       </div>
 
       {result && (
-        <InlineNotice
-          tone={result.errors?.length ? "warning" : "success"}
-          title={result.errors?.length ? "Import complete with issues" : "Import complete"}
-          message={[
-            result.filesProcessed ? `${result.filesProcessed} files processed` : "",
-            result.inserted ? `${result.inserted} new properties added` : "",
-            result.updated ? `${result.updated} existing properties merged` : "",
-            result.skipped ? `${result.skipped} rows skipped` : "",
-          ].filter(Boolean).join("; ") || `${result.imported} properties processed`}
-          actionLabel="Go to Dashboard"
-          onAction={() => router.push("/")}
-        />
+        <div className="space-y-3">
+          <InlineNotice
+            tone={result.errors?.length ? "warning" : "success"}
+            title={result.errors?.length ? "Import complete with issues" : "Import complete"}
+            message={[
+              result.filesProcessed ? `${result.filesProcessed} files processed` : "",
+              result.inserted ? `${result.inserted} new properties added` : "",
+              result.updated ? `${result.updated} existing properties merged` : "",
+              result.skipped ? `${result.skipped} rows skipped` : "",
+            ].filter(Boolean).join("; ") || `${result.imported} properties processed`}
+          />
+
+          {/* Post-import pipeline prompt */}
+          <div className="rounded-lg border border-gray-200 bg-white p-5">
+            <p className="text-sm text-gray-700">
+              Would you like to run the processing pipeline on these properties now?
+              This will geocode addresses, fetch Street View imagery, and run vacancy detection.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                onClick={() => router.push("/processing?autostart=true")}
+                className="rounded-md bg-civic-green px-5 py-2 text-sm font-medium text-white hover:bg-civic-green-light"
+              >
+                Run Pipeline Now
+              </button>
+              <button
+                onClick={() => setResult(null)}
+                className="rounded-md border border-gray-200 px-5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Skip, I will process later
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {result?.errors?.length > 0 && (

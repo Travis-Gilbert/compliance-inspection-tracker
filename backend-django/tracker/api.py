@@ -364,18 +364,6 @@ def get_stats(request):
     }
 
 
-@properties_router.get("/{property_id}")
-def get_property(request, property_id: int):
-    """Get a single property with communication count."""
-    try:
-        prop = Property.objects.annotate(
-            communication_count=Count("communications")
-        ).get(pk=property_id)
-    except Property.DoesNotExist:
-        return api.create_response(request, {"detail": "Property not found"}, status=404)
-    return _property_to_dict(prop, prop.communication_count)
-
-
 @properties_router.post("/")
 def create_property(request, payload: PropertyCreate):
     """Create a new property."""
@@ -396,38 +384,6 @@ def create_property(request, payload: PropertyCreate):
         streetview_historical_date=payload.streetview_historical_date,
     )
     return _property_to_dict(prop)
-
-
-@properties_router.patch("/{property_id}")
-def update_property(request, property_id: int, payload: PropertyUpdate):
-    """Partial update a property."""
-    try:
-        prop = Property.objects.get(pk=property_id)
-    except Property.DoesNotExist:
-        return api.create_response(request, {"detail": "Property not found"}, status=404)
-
-    update_data = payload.dict(exclude_none=True)
-    if not update_data:
-        return api.create_response(request, {"detail": "No fields to update"}, status=400)
-
-    for field, value in update_data.items():
-        setattr(prop, field, value)
-
-    if "address" in update_data:
-        prop.address_key = build_address_key(update_data["address"])
-    if "finding" in update_data:
-        prop.reviewed_at = datetime.now() if update_data["finding"] else None
-
-    prop.save()
-    comm_count = prop.communications.count()
-    return _property_to_dict(prop, comm_count)
-
-
-@properties_router.delete("/{property_id}")
-def delete_property(request, property_id: int):
-    """Delete a property."""
-    deleted_count, _ = Property.objects.filter(pk=property_id).delete()
-    return {"deleted": deleted_count > 0}
 
 
 @properties_router.post("/batch-update")
@@ -628,6 +584,53 @@ def export_summary(request):
     stats = get_stats(request)
     report = generate_summary_report(stats)
     return HttpResponse(report, content_type="text/plain")
+
+
+# Path-parameter routes must come after all static /properties/* routes
+# so Django Ninja doesn't match "import", "export", etc. as {property_id}.
+
+@properties_router.get("/{property_id}")
+def get_property(request, property_id: int):
+    """Get a single property with communication count."""
+    try:
+        prop = Property.objects.annotate(
+            communication_count=Count("communications")
+        ).get(pk=property_id)
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+    return _property_to_dict(prop, prop.communication_count)
+
+
+@properties_router.patch("/{property_id}")
+def update_property(request, property_id: int, payload: PropertyUpdate):
+    """Partial update a property."""
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    update_data = payload.dict(exclude_none=True)
+    if not update_data:
+        return api.create_response(request, {"detail": "No fields to update"}, status=400)
+
+    for field, value in update_data.items():
+        setattr(prop, field, value)
+
+    if "address" in update_data:
+        prop.address_key = build_address_key(update_data["address"])
+    if "finding" in update_data:
+        prop.reviewed_at = datetime.now() if update_data["finding"] else None
+
+    prop.save()
+    comm_count = prop.communications.count()
+    return _property_to_dict(prop, comm_count)
+
+
+@properties_router.delete("/{property_id}")
+def delete_property(request, property_id: int):
+    """Delete a property."""
+    deleted_count, _ = Property.objects.filter(pk=property_id).delete()
+    return {"deleted": deleted_count > 0}
 
 
 # ============================================================

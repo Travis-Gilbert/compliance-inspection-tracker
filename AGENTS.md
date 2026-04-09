@@ -11,8 +11,8 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Tech Stack
 
-- **Backend:** FastAPI (Python 3.10+), async with aiosqlite
-- **Frontend:** React 18 + Vite + Tailwind CSS (no TypeScript)
+- **Backend:** Django Ninja on Railway (`backend-django/`) with the original FastAPI app retained in `backend/`
+- **Frontend:** Next.js 15 App Router + React 19 + TypeScript + Tailwind CSS
 - **Database:** SQLite (single local file at `backend/data/compliance_tracker.db`)
 - **External APIs:** Google Maps Platform (Street View Static, Maps Static, Geocoding)
 - **Image Analysis:** NumPy + Pillow for heuristic vacancy/demolition detection
@@ -32,12 +32,12 @@ uvicorn app.main:app --reload     # http://localhost:8000
 ```bash
 cd frontend
 npm install
-npm run dev                       # http://localhost:5173
-npm run build                     # Production build to dist/
+npm run dev                       # http://localhost:3000
+npm run build                     # Production build via Next.js
 ```
 
 ### Both (typical dev session)
-Start backend first (port 8000), then frontend (port 5173). Vite proxies `/api` and `/images` to the backend automatically via `vite.config.js`.
+Start `backend-django` first (port 8001), then frontend (port 3000). The Next.js app uses same-origin requests locally and `next.config.ts` rewrites `/api` and `/images` to the Django backend.
 
 ### API docs
 FastAPI auto-generates Swagger UI at http://localhost:8000/docs when the backend is running.
@@ -64,12 +64,11 @@ The API key must have three APIs enabled individually in Google Cloud Console: G
 
 ### Request flow
 ```
-Browser (React, :5173)
-  → Vite proxy (/api/*, /images/*)
-    → FastAPI (:8000)
-      → aiosqlite (SQLite)
-      → Google Maps APIs (geocoding, imagery)
-      → Disk cache (backend/data/images/)
+Browser (Next.js, :3000 locally or Vercel in production)
+  → same-origin `/api/*` and `/images/*` locally
+  → Django backend (`backend-django/`, :8001 locally or Railway in production)
+    → SQLite / cached imagery
+    → Google Maps APIs (geocoding, imagery)
 ```
 
 ### Backend layer structure
@@ -110,15 +109,17 @@ Three tables: `properties` (main data, 25+ columns tracking the full lifecycle),
 
 | Path | Component | Purpose |
 |------|-----------|---------|
-| `/` | `Dashboard.jsx` | Stats, progress bar, pipeline controls |
-| `/review` | `ReviewQueue.jsx` | Main work surface, property list sorted worst-first |
-| `/property/:id` | `PropertyDetail.jsx` | Single property deep-dive with imagery |
-| `/import` | `Import.jsx` | CSV file upload or text paste |
-| `/export` | `Export.jsx` | Download options (full CSV, inspection list, summary) |
+| `/` | `src/app/(main)/page.tsx` | Dashboard, photo coverage, progress |
+| `/review` | `src/app/(main)/review/page.tsx` | Main work surface, property list sorted worst-first |
+| `/property/:id` | `src/app/(main)/property/[id]/page.tsx` | Single property deep-dive with imagery |
+| `/import` | `src/app/(main)/import/page.tsx` | CSV file upload or text paste |
+| `/export` | `src/app/(main)/export/page.tsx` | Download options (full CSV, inspection list, summary) |
+| `/processing` | `src/app/(main)/processing/page.tsx` | Batch geocoding, imagery fetch, detection pipeline |
+| `/map` | `src/app/map/page.tsx` | Full-bleed management map |
 
 ### Frontend API client
 
-All backend calls go through `src/utils/api.js`. It exports named functions per endpoint (e.g., `getProperties()`, `updateProperty()`, `runPipeline()`). The Vite dev server proxy means the frontend uses relative paths (`/api/...`) with no base URL.
+All backend calls go through `frontend/src/lib/api.ts`. In local development the frontend uses same-origin paths and Next rewrites; in production it defaults directly to the Railway backend so image and API traffic do not depend on Vercel proxy routing.
 
 CSV import uses `FormData` (multipart), not JSON, because FastAPI requires `Form()` params when `UploadFile` is present.
 
@@ -191,7 +192,7 @@ All findings except `inconclusive` are considered "resolved" (desk-resolved, no 
 
 ## Design tokens
 
-Colors are defined in `frontend/tailwind.config.js` and `frontend/src/utils/constants.js`:
+Colors are defined in `frontend/tailwind.config.ts` and `frontend/src/lib/constants.ts`:
 - Primary actions: civic green `#2E7D32`
 - Secondary: civic blue `#1565C0`
 - Page background: warm off-white `#FAFAF5`
@@ -205,7 +206,7 @@ Aesthetic: civic utilitarian. High data density, no decoration. Think government
 | Component | Status | Notes |
 |-----------|--------|-------|
 | Backend (FastAPI + SQLite) | Done | All CRUD, import, export, stats, pipeline endpoints |
-| Frontend (React + Vite) | Done | All 5 pages with routing, error boundaries, loading skeletons |
+| Frontend (Next.js App Router) | Done | Dashboard, review queue, property detail, import, export, processing, and map routes |
 | CSV parser (smart column detection) | Done | Two-pass matching, BOM handling, \x0b stripping for FileMaker |
 | Pipeline (geocode, imagery, detection) | Done | Tested end-to-end with 9 Flint properties; all three stages working |
 | SSE streaming pipeline | Done | Real-time per-step progress bars in Dashboard |

@@ -148,6 +148,9 @@ function ImagePanel({
 interface ManagementCoverageMapProps {
   properties: any[];
   totalProperties: number;
+  humanReviewed: number;
+  imageryFetched: number;
+  systemTriaged: number;
   loading: boolean;
   error: string;
 }
@@ -155,6 +158,9 @@ interface ManagementCoverageMapProps {
 export default function ManagementCoverageMap({
   properties,
   totalProperties,
+  humanReviewed,
+  imageryFetched,
+  systemTriaged,
   loading,
   error,
 }: ManagementCoverageMapProps) {
@@ -249,8 +255,6 @@ export default function ManagementCoverageMap({
       current_only: 0,
       satellite_only: 0,
       no_imagery: 0,
-      reviewed: properties.filter((property: any) => property.finding).length,
-      unreviewed: properties.filter((property: any) => !property.finding).length,
       ungeocoded: 0,
       covered: 0,
     };
@@ -276,8 +280,11 @@ export default function ManagementCoverageMap({
   const coverageRate = totalProperties > 0
     ? Math.round((coverageSummary.covered / totalProperties) * 100)
     : 0;
-  const reviewRate = totalProperties > 0
-    ? Math.round((coverageSummary.reviewed / totalProperties) * 100)
+  const systemTriagedRate = totalProperties > 0
+    ? Math.round((systemTriaged / totalProperties) * 100)
+    : 0;
+  const humanReviewRate = totalProperties > 0
+    ? Math.round((humanReviewed / totalProperties) * 100)
     : 0;
   const activeCoverage = activeProperty ? getCoverageStatus(activeProperty, historicalState) : null;
   const activeFinding = activeProperty
@@ -296,7 +303,7 @@ export default function ManagementCoverageMap({
               County Photo Coverage
             </h3>
             <p className="mt-1 text-sm text-gray-600">
-              Hover or click a property to inspect current coverage and compare historical versus current imagery.
+              Hover or click a property to inspect current coverage, compare historical versus current imagery, and track system triage readiness.
             </p>
           </div>
 
@@ -311,7 +318,7 @@ export default function ManagementCoverageMap({
               href="/review"
               className="rounded border border-civic-green bg-civic-green px-3 py-1.5 font-medium text-white transition-colors hover:bg-civic-green-light"
             >
-              Open Review Queue
+              Open Manual Review
             </Link>
           </div>
         </div>
@@ -323,7 +330,7 @@ export default function ManagementCoverageMap({
             { label: "Current Only", value: coverageSummary.current_only, detail: "Current Street View only" },
             { label: "Satellite Only", value: coverageSummary.satellite_only, detail: "No Street View image yet" },
             { label: "Not Geocoded", value: coverageSummary.ungeocoded, detail: "Not represented on the county map" },
-            { label: "Reviewed", value: `${reviewRate}%`, detail: `${coverageSummary.reviewed} of ${totalProperties}` },
+            { label: "System Triaged", value: `${systemTriagedRate}%`, detail: `${systemTriaged} triaged, ${humanReviewRate}% human-reviewed` },
           ].map((card) => (
             <div key={card.label} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
               <div className="text-[11px] uppercase tracking-wide text-gray-500">{card.label}</div>
@@ -449,7 +456,7 @@ export default function ManagementCoverageMap({
                     </span>
                   ) : (
                     <span className="rounded bg-gray-100 px-2 py-1 font-medium text-gray-600">
-                      Unreviewed
+                      Awaiting manual finding
                     </span>
                   )}
                 </div>

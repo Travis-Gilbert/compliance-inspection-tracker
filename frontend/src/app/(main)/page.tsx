@@ -75,7 +75,14 @@ export default function Dashboard() {
   }
 
   const pct = stats?.percent_reviewed || 0;
-  const highestUrgent = Math.max(stats!.needs_inspection, stats!.unreviewed);
+  const imageryFetched = stats?.imagery_fetched || 0;
+  const detectionRan = stats?.detection_ran || 0;
+  const photoCoveragePct = stats!.total > 0
+    ? Math.round((imageryFetched / stats!.total) * 100)
+    : 0;
+  const systemTriagedPct = stats!.total > 0
+    ? Math.round((detectionRan / stats!.total) * 100)
+    : 0;
   const highlightInspection = stats!.needs_inspection >= stats!.unreviewed;
 
   const laneCounts: Record<string, number> = {
@@ -89,6 +96,7 @@ export default function Dashboard() {
   const nonCompliantCount = stats!.by_compliance_status?.non_compliant || 0;
   const taxDelinquentCount = stats!.by_compliance_status?.needs_outreach || 0;
   const allReviewed = stats!.unreviewed === 0 && stats!.total > 0;
+  const allPhotoReady = imageryFetched === stats!.total && detectionRan === stats!.total && stats!.total > 0;
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-5">
@@ -122,6 +130,20 @@ export default function Dashboard() {
             Open Review Queue
           </Link>
         </div>
+      ) : allPhotoReady ? (
+        <div className="rounded-lg border border-civic-blue/20 bg-civic-blue-pale px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-sm text-civic-blue">
+            <span className="font-semibold">{imageryFetched}</span> properties have photo coverage and
+            <span className="font-semibold"> {detectionRan}</span> have completed system triage; manual findings are still open for
+            <span className="font-semibold"> {stats!.unreviewed}</span>.
+          </span>
+          <Link
+            href="/review?filter=unreviewed"
+            className="text-xs font-semibold text-civic-blue hover:underline shrink-0"
+          >
+            Open Manual Review &rarr;
+          </Link>
+        </div>
       ) : (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
           <span className="text-sm text-amber-800">
@@ -144,7 +166,7 @@ export default function Dashboard() {
 
       {/* Review progress (compact) */}
       <div className="flex items-center gap-3">
-        <span className="text-xs font-medium text-gray-500 shrink-0">Review Progress</span>
+        <span className="text-xs font-medium text-gray-500 shrink-0">Manual Review Progress</span>
         <div className="h-2 flex-1 rounded-full bg-gray-100">
           <div
             className="h-2 rounded-full bg-civic-green transition-all duration-500"
@@ -153,8 +175,39 @@ export default function Dashboard() {
         </div>
         <span className="text-xs font-medium text-civic-green shrink-0">{pct}%</span>
         <span className="text-xs text-gray-400 shrink-0 hidden sm:inline">
-          ({stats!.reviewed} reviewed, {stats!.unreviewed} remaining)
+          ({stats!.reviewed} with findings, {stats!.unreviewed} remaining)
         </span>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="text-xs font-medium text-gray-500 shrink-0">Photo Coverage</span>
+        <div className="h-2 flex-1 rounded-full bg-gray-100">
+          <div
+            className="h-2 rounded-full bg-civic-blue transition-all duration-500"
+            style={{ width: `${photoCoveragePct}%` }}
+          />
+        </div>
+        <span className="text-xs font-medium text-civic-blue shrink-0">{photoCoveragePct}%</span>
+        <span className="text-xs text-gray-400 shrink-0 hidden sm:inline">
+          ({imageryFetched} with imagery, {detectionRan} system-triaged)
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
+        <StatCard
+          label="Photo Ready"
+          value={`${photoCoveragePct}%`}
+          subtitle={`${imageryFetched} of ${stats!.total} with imagery`}
+          accentColor="#1565C0"
+          href="/processing"
+        />
+        <StatCard
+          label="System Triaged"
+          value={`${systemTriagedPct}%`}
+          subtitle={`${detectionRan} of ${stats!.total} processed`}
+          accentColor="#2E7D32"
+          href="/processing"
+        />
       </div>
 
       {/* Summary stats row */}
@@ -179,7 +232,7 @@ export default function Dashboard() {
           highlight={highlightInspection && stats!.needs_inspection > 0}
         />
         <StatCard
-          label="Unreviewed"
+          label="Manual Review Remaining"
           value={stats!.unreviewed}
           accentColor="#D1D5DB"
           href="/review?filter=unreviewed"
@@ -191,6 +244,9 @@ export default function Dashboard() {
       <ManagementCoverageMap
         properties={mapProperties}
         totalProperties={stats!.total}
+        humanReviewed={stats!.reviewed}
+        imageryFetched={imageryFetched}
+        systemTriaged={detectionRan}
         loading={mapLoading}
         error={mapError}
       />

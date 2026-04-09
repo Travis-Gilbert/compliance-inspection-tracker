@@ -31,6 +31,9 @@ export interface Property {
 
 export interface Stats {
   total: number;
+  geocoded: number;
+  imagery_fetched: number;
+  detection_ran: number;
   reviewed: number;
   unreviewed: number;
   resolved: number;

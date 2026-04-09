@@ -1,10 +1,31 @@
 /**
  * API client for the Django Ninja backend.
  *
- * Uses relative URLs; Next.js rewrites in next.config.ts proxy /api/* and
- * /images/* to the Django backend. This file is a near-verbatim TypeScript
- * port of the Vite frontend's api.js.
+ * Uses same-origin URLs in local development, where Next.js rewrites in
+ * next.config.ts proxy /api/* and /images/* to the Django backend.
+ * In production, default directly to Railway so the app does not depend on
+ * Vercel service-level proxy routing for API and image requests.
  */
+
+const PRODUCTION_API_FALLBACK = "https://backend-production-3996.up.railway.app";
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
+
+function getApiBaseUrl() {
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "");
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  if (typeof window !== "undefined" && LOCAL_HOSTS.has(window.location.hostname)) {
+    return "";
+  }
+
+  return PRODUCTION_API_FALLBACK;
+}
+
+function resolveApiUrl(path: string) {
+  return `${getApiBaseUrl()}${path}`;
+}
 
 async function getErrorMessage(res: Response, fallback = `API error: ${res.status}`) {
   const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -12,7 +33,7 @@ async function getErrorMessage(res: Response, fallback = `API error: ${res.statu
 }
 
 async function request(path: string, options: RequestInit = {}) {
-  const res = await fetch(path, {
+  const res = await fetch(resolveApiUrl(path), {
     headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
   });
@@ -69,7 +90,7 @@ export const batchUpdateProperties = (propertyIds: number[], finding: string, no
 export const importCSV = async (file: File) => {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch("/api/properties/import", {
+  const res = await fetch(resolveApiUrl("/api/properties/import"), {
     method: "POST",
     body: formData,
   });
@@ -80,7 +101,7 @@ export const importCSV = async (file: File) => {
 export const importCSVText = async (text: string) => {
   const formData = new FormData();
   formData.append("text", text);
-  const res = await fetch("/api/properties/import", {
+  const res = await fetch(resolveApiUrl("/api/properties/import"), {
     method: "POST",
     body: formData,
   });
@@ -105,7 +126,7 @@ export const fetchHistoricalImagery = (propertyId: number | string) =>
   request(`/api/imagery/fetch-historical/${propertyId}`, { method: "POST" }).then((r) => r.json());
 
 export const getImageUrl = (propertyId: number | string, type: string) =>
-  `/api/imagery/image/${propertyId}/${type}`;
+  resolveApiUrl(`/api/imagery/image/${propertyId}/${type}`);
 
 // Detection
 export const runDetectionBatch = (limit = 50) =>
@@ -135,7 +156,7 @@ export const runPipelineStream = (
     process_all: processAll ? "true" : "false",
   }).toString();
   const run = async () => {
-    const res = await fetch(`/api/pipeline/process-stream?${qs}`, {
+    const res = await fetch(resolveApiUrl(`/api/pipeline/process-stream?${qs}`), {
       method: "POST",
       signal: controller.signal,
     });
@@ -172,7 +193,7 @@ export const runPipelineAll = (
 ) => {
   const controller = new AbortController();
   const run = async () => {
-    const res = await fetch(`/api/pipeline/process-all?batch_size=${batchSize}`, {
+    const res = await fetch(resolveApiUrl(`/api/pipeline/process-all?batch_size=${batchSize}`), {
       method: "POST",
       signal: controller.signal,
     });
@@ -215,9 +236,9 @@ export const createComm = (data: Record<string, unknown>) =>
 // Export URLs
 export const exportCSVUrl = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams(params).toString();
-  return `/api/properties/export/csv?${qs}`;
+  return resolveApiUrl(`/api/properties/export/csv?${qs}`);
 };
 
-export const exportInspectionListUrl = () => "/api/properties/export/inspection-list";
-export const exportResolvedCsvUrl = () => "/api/properties/export/resolved";
-export const exportSummaryUrl = () => "/api/properties/export/summary";
+export const exportInspectionListUrl = () => resolveApiUrl("/api/properties/export/inspection-list");
+export const exportResolvedCsvUrl = () => resolveApiUrl("/api/properties/export/resolved");
+export const exportSummaryUrl = () => resolveApiUrl("/api/properties/export/summary");

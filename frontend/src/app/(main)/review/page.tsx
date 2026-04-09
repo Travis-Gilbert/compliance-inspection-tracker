@@ -212,8 +212,8 @@ function ReviewQueueInner() {
           {stats && (
             <div className="mt-1 flex gap-3 text-[11px] text-gray-500">
               <span>{totalCount} in view</span>
-              <span className="text-civic-green">{stats.reviewed} reviewed</span>
-              <span>{stats.unreviewed} remaining</span>
+              <span className="text-civic-green">{stats.reviewed} with manual findings</span>
+              <span>{stats.unreviewed} awaiting manual review</span>
             </div>
           )}
         </div>

@@ -1,36 +1,29 @@
+"use client";
+
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useSearchParams } from "next/navigation";
 import {
   getImageryStatus,
-  getMapProperties,
   getStats,
   runPipelineAll,
   runPipelineStream,
-} from "../utils/api";
-import {
-  DETECTION_LABELS,
-  FINDINGS,
-  REVIEW_FAST_LANES,
-} from "../utils/constants";
-import InlineNotice from "../components/InlineNotice";
-import ManagementCoverageMap from "../components/ManagementCoverageMap";
-import { DashboardSkeleton } from "../components/LoadingSkeleton";
+} from "@/lib/api";
+import { DETECTION_LABELS, FINDINGS } from "@/lib/constants";
+import type { PipelineEvent, Stats } from "@/lib/types";
+import InlineNotice from "@/components/InlineNotice";
 
-const STEP_LABELS = {
+const STEP_LABELS: Record<string, string> = {
   geocode: "Geocoding addresses",
   imagery: "Fetching imagery",
-  historical: "Fetching sold-date imagery",
   detection: "Running detection",
 };
 
-function PipelineProgress({ events }) {
-  if (!events.length) {
-    return null;
-  }
+function PipelineProgress({ events }: { events: PipelineEvent[] }) {
+  if (!events.length) return null;
 
-  const steps = ["geocode", "imagery", "historical", "detection"];
-  const stepState = {};
-  let grandTotals = null;
+  const steps = ["geocode", "imagery", "detection"];
+  const stepState: Record<string, PipelineEvent> = {};
+  let grandTotals: { total: number } | null = null;
   let grandProcessed = 0;
 
   for (const event of events) {
@@ -45,25 +38,15 @@ function PipelineProgress({ events }) {
     }
   }
 
-  const completeEvent = [...events].reverse().find((event) => event.step === "complete");
-  const errorEvent = [...events].reverse().find((event) => event.step === "error");
-  const grandTotal = steps.reduce((sum, step) => {
-    const state = stepState[step];
-    if (state) {
-      return sum + (state.total ?? state.attempted ?? 0);
-    }
-    return sum + (grandTotals?.[step] ?? 0);
-  }, 0);
+  const completeEvent = [...events].reverse().find((e) => e.step === "complete");
+  const errorEvent = [...events].reverse().find((e) => e.step === "error");
+  const grandTotal = grandTotals?.total || 0;
   const grandPct = grandTotal > 0 ? Math.round((grandProcessed / grandTotal) * 100) : 0;
 
   return (
     <div className="mt-4 space-y-3">
       {errorEvent?.message && (
-        <InlineNotice
-          tone="error"
-          title="Pipeline failed"
-          message={errorEvent.message}
-        />
+        <InlineNotice tone="error" title="Pipeline failed" message={errorEvent.message} />
       )}
 
       {grandTotals && (
@@ -86,12 +69,9 @@ function PipelineProgress({ events }) {
 
       {steps.map((step) => {
         const state = stepState[step];
-        if (!state) {
-          return null;
-        }
+        if (!state) return null;
 
         const isDone = state.status === "done";
-        const isProgress = ["started", "progress", "batch_complete"].includes(state.status);
         const total = state.total ?? state.attempted ?? 0;
         const current = state.current ?? 0;
         const pct = total > 0
@@ -136,49 +116,40 @@ function PipelineProgress({ events }) {
   );
 }
 
-export default function Dashboard() {
-  const [stats, setStats] = useState(null);
-  const [apiStatus, setApiStatus] = useState(null);
+export default function ProcessingPage() {
+  const searchParams = useSearchParams();
+  const autostart = searchParams.get("autostart") === "true";
+
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [apiStatus, setApiStatus] = useState<{ configured: boolean } | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [mapProperties, setMapProperties] = useState([]);
-  const [mapLoading, setMapLoading] = useState(true);
-  const [mapError, setMapError] = useState("");
   const [processing, setProcessing] = useState(false);
   const [processingMode, setProcessingMode] = useState("batch");
-  const [pipelineEvents, setPipelineEvents] = useState([]);
-  const [pipelineNotice, setPipelineNotice] = useState(null);
-  const cancelRef = useRef(null);
+  const [pipelineEvents, setPipelineEvents] = useState<PipelineEvent[]>([]);
+  const [pipelineNotice, setPipelineNotice] = useState<{
+    tone: "info" | "success" | "warning" | "error";
+    title: string;
+    message: string;
+  } | null>(null);
+  const cancelRef = useRef<(() => void) | null>(null);
+  const autostartedRef = useRef(false);
 
   const loadData = async () => {
     setLoadError("");
-    setMapError("");
-    setMapLoading(true);
-    const [statsResult, statusResult, mapResult] = await Promise.allSettled([
+    const [statsResult, statusResult] = await Promise.allSettled([
       getStats(),
       getImageryStatus(),
-      getMapProperties(),
     ]);
 
     if (statsResult.status === "fulfilled") {
       setStats(statsResult.value);
     } else {
-      setLoadError(statsResult.reason?.message || "Could not load dashboard data.");
+      setLoadError(statsResult.reason?.message || "Could not load data.");
     }
 
     if (statusResult.status === "fulfilled") {
       setApiStatus(statusResult.value);
-    } else {
-      setApiStatus(null);
     }
-
-    if (mapResult.status === "fulfilled") {
-      setMapProperties(mapResult.value.properties || []);
-    } else {
-      setMapProperties([]);
-      setMapError(mapResult.reason?.message || "Could not load county coverage data.");
-    }
-
-    setMapLoading(false);
   };
 
   useEffect(() => {
@@ -192,11 +163,11 @@ export default function Dashboard() {
     setPipelineNotice(null);
 
     const runner = processAll
-      ? runPipelineAll(100, (event) => setPipelineEvents((prev) => [...prev, event]))
+      ? runPipelineAll(100, (event) => setPipelineEvents((prev) => [...prev, event as unknown as PipelineEvent]))
       : runPipelineStream(
           25,
-          (event) => setPipelineEvents((prev) => [...prev, event]),
-          { processAll: false }
+          (event) => setPipelineEvents((prev) => [...prev, event as unknown as PipelineEvent]),
+          { processAll: false },
         );
 
     cancelRef.current = runner.cancel;
@@ -211,19 +182,20 @@ export default function Dashboard() {
           ? "The pipeline ran through every remaining eligible property."
           : "The next batch finished processing.",
       });
-    } catch (error) {
-      if (error.name === "AbortError") {
+    } catch (error: unknown) {
+      const err = error as Error;
+      if (err.name === "AbortError") {
         setPipelineNotice({
           tone: "warning",
           title: "Processing stopped",
           message: "The current pipeline run was stopped before completion.",
         });
       } else {
-        setPipelineEvents((prev) => [...prev, { step: "error", message: error.message }]);
+        setPipelineEvents((prev) => [...prev, { step: "error", message: err.message }]);
         setPipelineNotice({
           tone: "error",
           title: "Processing failed",
-          message: error.message,
+          message: err.message,
         });
       }
     } finally {
@@ -232,144 +204,51 @@ export default function Dashboard() {
     }
   };
 
-  const handleStop = () => {
-    if (cancelRef.current) {
-      cancelRef.current();
+  // Auto-start if coming from import page
+  useEffect(() => {
+    if (autostart && stats && !autostartedRef.current && stats.total > 0) {
+      autostartedRef.current = true;
+      handleProcess({ processAll: false });
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autostart, stats]);
 
-  if (!stats && !loadError) {
-    return <DashboardSkeleton />;
-  }
-
-  if (!stats && loadError) {
-    return (
-      <InlineNotice
-        tone="error"
-        title="Dashboard unavailable"
-        message={loadError}
-        actionLabel="Retry"
-        onAction={loadData}
-      />
-    );
-  }
-
-  const pct = stats?.percent_reviewed || 0;
-  const laneCounts = {
-    unreviewed: stats.unreviewed,
-    likely_demolished: stats.unreviewed_by_detection?.likely_demolished || 0,
-    likely_vacant: stats.unreviewed_by_detection?.likely_vacant || 0,
-    needs_inspection: stats.needs_inspection,
-    unprocessed: stats.unreviewed_by_detection?.unprocessed || 0,
+  const handleStop = () => {
+    cancelRef.current?.();
   };
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-4xl mx-auto p-4 md:p-6 space-y-6">
       <div>
-        <h2 className="font-heading text-2xl font-bold text-gray-900">Management Dashboard</h2>
+        <h2 className="font-heading text-2xl font-bold text-gray-900">Processing Pipeline</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Countywide coverage and compliance progress overview
+          Geocode addresses, fetch Street View and satellite imagery, and run vacancy detection.
         </p>
       </div>
 
       {loadError && (
         <InlineNotice
-          tone="warning"
-          title="Some dashboard data could not be refreshed"
+          tone="error"
+          title="Data unavailable"
           message={loadError}
           actionLabel="Retry"
           onAction={loadData}
         />
       )}
 
+      {/* Pipeline controls */}
       <div className="rounded-lg border border-gray-200 bg-white p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="font-heading font-semibold text-gray-900">Review Progress</span>
-          <span className="text-sm font-medium text-civic-green">{pct}%</span>
-        </div>
-        <div className="h-3 w-full rounded-full bg-gray-100">
-          <div
-            className="h-3 rounded-full bg-civic-green transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <div className="mt-2 flex justify-between text-xs text-gray-500">
-          <span>{stats.reviewed} reviewed</span>
-          <span>{stats.unreviewed} remaining</span>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[
-          { label: "Total Properties", value: stats.total, accent: "border-l-gray-400" },
-          { label: "Resolved (Desk)", value: stats.resolved, accent: "border-l-civic-green" },
-          { label: "Needs Inspection", value: stats.needs_inspection, accent: "border-l-orange-500" },
-          { label: "Unreviewed", value: stats.unreviewed, accent: "border-l-gray-300" },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className={`rounded-lg border border-gray-200 border-l-4 ${card.accent} bg-white p-4`}
-          >
-            <div className="text-xs uppercase tracking-wide text-gray-500">{card.label}</div>
-            <div className="mt-1 font-heading text-2xl font-bold text-gray-900">{card.value}</div>
-          </div>
-        ))}
-      </div>
-
-      <ManagementCoverageMap
-        properties={mapProperties}
-        totalProperties={stats.total}
-        loading={mapLoading}
-        error={mapError}
-      />
-
-      <div className="rounded-lg border border-gray-200 bg-white p-5">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-heading font-semibold text-gray-900">Fast Review Lanes</h3>
-            <p className="mt-1 text-sm text-gray-600">
-              Jump straight into the queue slice most likely to move the work forward.
-            </p>
-          </div>
-          <Link
-            to="/review"
-            className="rounded border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
-          >
-            Open Full Queue
-          </Link>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          {REVIEW_FAST_LANES.map((lane) => (
-            <Link
-              key={lane.id}
-              to={`/review?${new URLSearchParams(lane.params).toString()}`}
-              className="rounded-lg border border-gray-200 bg-gray-50 p-4 transition-colors hover:border-civic-green/40 hover:bg-civic-green-pale/20"
-            >
-              <div className="text-xs uppercase tracking-wide text-gray-500">Open lane</div>
-              <div className="mt-1 font-heading text-lg font-semibold text-gray-900">
-                {lane.label}
-              </div>
-              <div className="mt-2 text-sm text-gray-600">{lane.description}</div>
-              <div className="mt-3 text-xs font-medium text-civic-green">
-                {laneCounts[lane.id] || 0} open properties
-              </div>
-            </Link>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-lg border border-gray-200 bg-white p-5">
-        <h3 className="mb-2 font-heading font-semibold text-gray-900">Processing Pipeline</h3>
+        <h3 className="mb-2 font-heading font-semibold text-gray-900">Run Pipeline</h3>
         <p className="mb-4 text-sm text-gray-600">
-          Import properties, then run the pipeline to geocode addresses, fetch current Street View and satellite imagery, pull the Street View closest to the sold date, and run smart detection. Properties flagged as likely vacant or demolished will sort to the top of your review queue.
+          Import properties first, then run the pipeline to geocode, fetch imagery, and detect vacancy signals.
+          Properties flagged as likely vacant or demolished will sort to the top of the review queue.
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => handleProcess({ processAll: false })}
-            disabled={processing || stats.total === 0}
+            disabled={processing || !stats || stats.total === 0}
             className={`rounded-md px-5 py-2 text-sm font-medium transition-colors ${
-              processing || stats.total === 0
+              processing || !stats || stats.total === 0
                 ? "cursor-not-allowed bg-gray-200 text-gray-500"
                 : "bg-civic-green text-white hover:bg-civic-green-light"
             }`}
@@ -379,9 +258,9 @@ export default function Dashboard() {
 
           <button
             onClick={() => handleProcess({ processAll: true })}
-            disabled={processing || stats.total === 0}
+            disabled={processing || !stats || stats.total === 0}
             className={`rounded-md px-5 py-2 text-sm font-medium transition-colors ${
-              processing || stats.total === 0
+              processing || !stats || stats.total === 0
                 ? "cursor-not-allowed bg-gray-200 text-gray-500"
                 : "bg-civic-blue text-white hover:bg-civic-blue-light"
             }`}
@@ -417,9 +296,10 @@ export default function Dashboard() {
         <PipelineProgress events={pipelineEvents} />
       </div>
 
-      {Object.keys(stats.by_detection || {}).length > 0 && (
+      {/* Detection results */}
+      {stats && Object.keys(stats.by_detection || {}).length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-5">
-          <h3 className="mb-3 font-heading font-semibold text-gray-900">Smart Detection Results</h3>
+          <h3 className="mb-3 font-heading font-semibold text-gray-900">Detection Results</h3>
           <div className="space-y-2">
             {Object.entries(stats.by_detection).map(([label, count]) => {
               const meta = DETECTION_LABELS[label] || { label, color: "#999", bg: "#f5f5f5" };
@@ -439,7 +319,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {Object.keys(stats.by_finding || {}).length > 0 && (
+      {/* Review Findings */}
+      {stats && Object.keys(stats.by_finding || {}).length > 0 && (
         <div className="rounded-lg border border-gray-200 bg-white p-5">
           <h3 className="mb-3 font-heading font-semibold text-gray-900">Review Findings</h3>
           <div className="space-y-2">
@@ -461,6 +342,21 @@ export default function Dashboard() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Current stats summary */}
+      {stats && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Current Status</div>
+          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-6">
+            <div>Total: <span className="font-medium">{stats.total}</span></div>
+            <div>Photo Ready: <span className="font-medium text-civic-blue">{stats.imagery_fetched}</span></div>
+            <div>System Triaged: <span className="font-medium text-civic-green">{stats.detection_ran}</span></div>
+            <div>Manual Findings: <span className="font-medium">{stats.reviewed}</span></div>
+            <div>Resolved: <span className="font-medium text-civic-green">{stats.resolved}</span></div>
+            <div>Needs Visit: <span className="font-medium text-orange-600">{stats.needs_inspection}</span></div>
           </div>
         </div>
       )}

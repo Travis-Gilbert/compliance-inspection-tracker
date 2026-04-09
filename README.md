@@ -47,34 +47,23 @@ compliance-tracker/
 │   ├── requirements.txt        # Python dependencies
 │   └── .env.example            # Environment variable template
 │
-├── frontend/                   # React application (Vite)
+├── frontend/                   # Next.js application (App Router)
 │   ├── src/
-│   │   ├── App.jsx             # Root component + routing
-│   │   ├── main.jsx            # React entry point
-│   │   ├── pages/
-│   │   │   ├── Dashboard.jsx       # Stats overview + progress (Option 4 foundation)
-│   │   │   ├── ReviewQueue.jsx     # Main work queue for desk research
-│   │   │   ├── PropertyDetail.jsx  # Single property deep-dive with imagery
-│   │   │   ├── Import.jsx          # CSV upload + preview + column mapping
-│   │   │   └── Export.jsx          # Export options + report generation
+│   │   ├── app/
+│   │   │   ├── (main)/             # Dashboard, review, import, export, processing
+│   │   │   └── map/                # Full-bleed management map
 │   │   ├── components/
-│   │   │   ├── Layout.jsx          # App shell with nav sidebar
-│   │   │   ├── PropertyCard.jsx    # Compact property row in queue
-│   │   │   ├── ImageViewer.jsx     # Street View + satellite side-by-side
-│   │   │   ├── FindingSelector.jsx # Finding buttons with color coding
-│   │   │   ├── StatsBar.jsx        # Top-level progress stats
-│   │   │   ├── FilterBar.jsx       # Filter tabs + search
-│   │   │   └── ProgressRing.jsx    # Circular progress indicator
+│   │   │   ├── LeadershipMap.tsx   # Full county map
+│   │   │   ├── ManagementCoverageMap.tsx
+│   │   │   └── review/             # Queue and detail components
 │   │   ├── hooks/
-│   │   │   ├── useProperties.js    # Property data fetching + mutations
-│   │   │   ├── useImagery.js       # Image loading + caching
-│   │   │   └── useStats.js         # Computed statistics
-│   │   └── utils/
-│   │       ├── api.js              # Backend API client
-│   │       └── constants.js        # Finding types, colors, programs
-│   ├── index.html
-│   ├── vite.config.js
-│   ├── tailwind.config.js
+│   │   │   ├── useReviewKeyboard.ts
+│   │   │   └── useReviewQueue.ts
+│   │   └── lib/
+│   │       ├── api.ts              # Backend API client
+│   │       └── constants.ts        # Finding types, colors, programs
+│   ├── next.config.ts
+│   ├── tailwind.config.ts
 │   └── package.json
 │
 └── README.md
@@ -102,21 +91,22 @@ uvicorn app.main:app --reload
 cd frontend
 npm install
 npm run dev
+npm run build
 ```
 
-Backend runs on http://localhost:8000
-Frontend runs on http://localhost:5173
+Backend runs on http://localhost:8001 for the Django service
+Frontend runs on http://localhost:3000
 
 ## Railway Deployment
 
 This project can run as two Railway services:
 
-- `backend`: FastAPI API
-- `frontend`: static React app served from the included Docker image
+- `backend`: Django Ninja API
+- `frontend`: Next.js application deployed on Vercel
 
 ### Backend service
 
-Set the backend service to the `backend/` directory and provide:
+Set the backend service to the `backend-django/` directory and provide:
 
 - `GOOGLE_MAPS_API_KEY`
 - `DATABASE_URL` for Postgres, or `DATABASE_PATH` for SQLite
@@ -145,20 +135,19 @@ The backend will attempt to enable PostGIS and add a spatial `location` column w
 
 ### Frontend service
 
-You can deploy the frontend from the `frontend/` directory on Vercel or Railway.
+Deploy the frontend from the `frontend/` directory on Vercel.
 
 Set this env var on the frontend deployment:
 
 ```bash
-VITE_API_BASE_URL=https://your-backend-domain
+NEXT_PUBLIC_API_URL=https://your-backend-domain
 ```
 
-The frontend includes [vercel.json](/Users/travisgilbert/Downloads/files%20(10)/compliance-tracker/frontend/vercel.json) so SPA routes like `/review`, `/property/123`, and `/map` rewrite to `index.html` on Vercel.
+If `NEXT_PUBLIC_API_URL` is omitted in production, the frontend falls back to the live Railway backend URL baked into `src/lib/api.ts`. Local development uses same-origin requests and `next.config.ts` rewrites to the backend.
 
 ### Monorepo setup
 
-In Railway, create one service from `backend/` and one from `frontend/`.
-Point the frontend service at the backend's public URL via `VITE_API_BASE_URL`.
+In Railway, create the backend service from `backend-django/`. In Vercel, point the frontend service at `frontend/` and set `NEXT_PUBLIC_API_URL` if you want to override the default production backend.
 
 ## Workflow
 

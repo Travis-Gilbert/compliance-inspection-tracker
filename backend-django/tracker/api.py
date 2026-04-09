@@ -794,7 +794,7 @@ def get_image(request, property_id: int, image_type: str):
     if not path.exists():
         return api.create_response(request, {"detail": "Image file not found on disk"}, status=404)
 
-    return FileResponse(path, content_type="image/jpeg")
+    return FileResponse(path.open("rb"), filename=path.name, content_type="image/jpeg")
 
 
 # ============================================================

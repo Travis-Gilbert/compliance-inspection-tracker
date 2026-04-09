@@ -11,7 +11,7 @@ import FilterPill from "@/components/ui/FilterPill";
 
 const FILTER_OPTIONS = [
   { value: "all", label: "All" },
-  { value: "unreviewed", label: "Unreviewed" },
+  { value: "unreviewed", label: "Open Review" },
   { value: "resolved", label: "Resolved" },
   { value: "inconclusive", label: "Needs Inspection" },
 ];

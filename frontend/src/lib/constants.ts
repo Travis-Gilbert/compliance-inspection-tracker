@@ -42,8 +42,8 @@ export const NAV_ITEMS = [
 export const REVIEW_FAST_LANES = [
   {
     id: "unreviewed",
-    label: "Unreviewed First",
-    description: "Work the full open queue by compliance priority.",
+    label: "Open Queue",
+    description: "Work the full open review queue by compliance priority.",
     params: { filter: "unreviewed", sort: "priority" },
   },
   {

@@ -95,7 +95,7 @@ export default function PropertyRow({
               </span>
             ) : (
               <span className="rounded bg-gray-50 px-1.5 py-0.5 text-[11px] italic text-gray-400">
-                Unreviewed
+                Awaiting Finding
               </span>
             )}
           </div>

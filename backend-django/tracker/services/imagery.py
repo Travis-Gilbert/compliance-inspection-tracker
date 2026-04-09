@@ -12,6 +12,8 @@ from django.conf import settings
 
 from tracker.utils.images import get_image_path, image_exists, save_image
 
+EARLIEST_STREETVIEW_TARGET = "2007-01"
+
 
 class ImageryResult:
     def __init__(
@@ -115,7 +117,7 @@ async def fetch_historical_streetview(
     lat: float,
     lng: float,
     address: str,
-    target_date: str,
+    target_date: Optional[str] = None,
     client: Optional[httpx.AsyncClient] = None,
     semaphore: Optional[asyncio.Semaphore] = None,
 ) -> tuple[str, bool, str]:
@@ -123,21 +125,26 @@ async def fetch_historical_streetview(
     if not settings.GOOGLE_MAPS_API_KEY:
         return "", False, ""
 
-    cache_suffix = f"streetview_historical_{target_date.replace('-', '')}"
+    requested_date = target_date or EARLIEST_STREETVIEW_TARGET
+    if requested_date == EARLIEST_STREETVIEW_TARGET:
+        cache_suffix = "streetview_historical_earliest"
+    else:
+        cache_suffix = f"streetview_historical_{requested_date.replace('-', '')}"
+
     if image_exists(address, cache_suffix):
         path = get_image_path(address, cache_suffix)
-        return str(path), True, target_date
+        return str(path), True, requested_date
 
     if client:
         return await fetch_streetview_image(
             lat, lng, address, client, semaphore=semaphore,
-            date=target_date, cache_suffix=cache_suffix,
+            date=requested_date, cache_suffix=cache_suffix,
         )
 
     async with httpx.AsyncClient(timeout=15.0) as local_client:
         return await fetch_streetview_image(
             lat, lng, address, local_client, semaphore=semaphore,
-            date=target_date, cache_suffix=cache_suffix,
+            date=requested_date, cache_suffix=cache_suffix,
         )
 
 

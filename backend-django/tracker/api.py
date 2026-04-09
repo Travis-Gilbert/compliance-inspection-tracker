@@ -726,14 +726,22 @@ async def fetch_batch_imagery(request, limit: int = 25):
 
 @imagery_router.post("/fetch-historical/{property_id}")
 async def fetch_historical(request, property_id: int):
-    """Fetch historical Street View imagery using closing date."""
-    from tracker.services.imagery import fetch_historical_streetview
+    """Fetch historical Street View imagery using closing date or earliest available coverage."""
+    from tracker.services.imagery import (
+        EARLIEST_STREETVIEW_TARGET,
+        fetch_historical_streetview,
+    )
     from asgiref.sync import sync_to_async
 
     @sync_to_async
     def _get_prop():
         return Property.objects.filter(pk=property_id).values(
-            "address", "latitude", "longitude", "closing_date",
+            "address",
+            "latitude",
+            "longitude",
+            "closing_date",
+            "streetview_historical_path",
+            "streetview_historical_date",
         ).first()
 
     row = await _get_prop()
@@ -742,10 +750,22 @@ async def fetch_historical(request, property_id: int):
     if row["latitude"] is None or row["longitude"] is None:
         return api.create_response(request, {"detail": "Property not geocoded yet"}, status=422)
 
+    if row["streetview_historical_path"]:
+        parsed = parse_closing_date(row["closing_date"] or "")
+        cached_target_date = (
+            parsed.strftime("%Y-%m") if parsed else EARLIEST_STREETVIEW_TARGET
+        )
+        return {
+            "property_id": property_id,
+            "historical_available": True,
+            "target_date": cached_target_date,
+            "actual_date": row["streetview_historical_date"] or cached_target_date,
+            "streetview_historical_path": row["streetview_historical_path"],
+            "date_source": "closing_date" if parsed else "earliest_available",
+        }
+
     parsed = parse_closing_date(row["closing_date"] or "")
-    if not parsed:
-        return api.create_response(request, {"detail": "No usable closing date available"}, status=422)
-    target_date = parsed.strftime("%Y-%m")
+    target_date = parsed.strftime("%Y-%m") if parsed else EARLIEST_STREETVIEW_TARGET
 
     path, available, actual_date = await fetch_historical_streetview(
         lat=row["latitude"], lng=row["longitude"],
@@ -767,6 +787,7 @@ async def fetch_historical(request, property_id: int):
         "target_date": target_date,
         "actual_date": actual_date,
         "streetview_historical_path": path,
+        "date_source": "closing_date" if parsed else "earliest_available",
     }
 
 

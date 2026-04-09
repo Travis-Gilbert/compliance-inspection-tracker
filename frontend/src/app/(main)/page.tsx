@@ -83,6 +83,9 @@ export default function Dashboard() {
   const systemTriagedPct = stats!.total > 0
     ? Math.round((detectionRan / stats!.total) * 100)
     : 0;
+  const manualReviewPct = stats!.total > 0
+    ? Math.round((stats!.reviewed / stats!.total) * 100)
+    : 0;
   const highlightInspection = stats!.needs_inspection >= stats!.unreviewed;
 
   const laneCounts: Record<string, number> = {
@@ -97,13 +100,23 @@ export default function Dashboard() {
   const taxDelinquentCount = stats!.by_compliance_status?.needs_outreach || 0;
   const allReviewed = stats!.unreviewed === 0 && stats!.total > 0;
   const allPhotoReady = imageryFetched === stats!.total && detectionRan === stats!.total && stats!.total > 0;
+  const overviewHeadline = allReviewed
+    ? `All ${stats!.total} properties have a manual finding recorded.`
+    : allPhotoReady
+      ? `${imageryFetched} properties are photo-ready, ${stats!.unreviewed} still need a manual finding.`
+      : `${imageryFetched} properties are photo-ready and ${detectionRan} have system triage.`;
+  const overviewCopy = allReviewed
+    ? "Desk review is complete for the current county list. Use the queue for spot checks, updates, and export."
+    : allPhotoReady
+      ? "The imagery and automated triage pass are complete, so the work left is human judgment and field follow-up."
+      : "Imagery and system triage are still filling in. The queue is best used for the strongest open signals first.";
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-5">
       <div>
         <h2 className="font-heading text-2xl font-bold text-gray-900">Management Dashboard</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Countywide coverage and compliance progress overview
+          Countywide photo coverage, review progress, and compliance signals
         </p>
       </div>
 
@@ -117,126 +130,143 @@ export default function Dashboard() {
         />
       )}
 
-      {/* Attention bar */}
-      {allReviewed ? (
-        <div className="rounded-lg border border-civic-green/20 bg-civic-green-pale px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-civic-green">
-            All {stats!.total} properties reviewed.
-          </span>
-          <Link
-            href="/review"
-            className="text-xs font-medium text-civic-green hover:underline shrink-0"
-          >
-            Open Review Queue
-          </Link>
-        </div>
-      ) : allPhotoReady ? (
-        <div className="rounded-lg border border-civic-blue/20 bg-civic-blue-pale px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-          <span className="text-sm text-civic-blue">
-            <span className="font-semibold">{imageryFetched}</span> properties have photo coverage and
-            <span className="font-semibold"> {detectionRan}</span> have completed system triage; manual findings are still open for
-            <span className="font-semibold"> {stats!.unreviewed}</span>.
-          </span>
-          <Link
-            href="/review?filter=unreviewed"
-            className="text-xs font-semibold text-civic-blue hover:underline shrink-0"
-          >
-            Open Manual Review &rarr;
-          </Link>
-        </div>
-      ) : (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
-          <span className="text-sm text-amber-800">
-            <span className="font-semibold">{stats!.unreviewed}</span> properties need review
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_320px]">
+        <section className="rounded-xl border border-gray-200 bg-[linear-gradient(135deg,#FAFAF5_0%,#FFFFFF_62%,#F3F8F3_100%)] p-5 shadow-[0_1px_4px_rgba(15,23,42,0.04)]">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">County overview</div>
+              <h3 className="mt-2 font-heading text-2xl font-semibold leading-tight text-gray-900">
+                {overviewHeadline}
+              </h3>
+              <p className="mt-2 max-w-2xl text-sm text-gray-600">
+                {overviewCopy}
+              </p>
+            </div>
+            <Link
+              href="/processing"
+              className="rounded border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              Open Processing
+            </Link>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-civic-blue/20 bg-white px-3 py-1 font-medium text-civic-blue">
+              {imageryFetched} photo ready
+            </span>
+            <span className="rounded-full border border-civic-green/20 bg-white px-3 py-1 font-medium text-civic-green">
+              {detectionRan} system triaged
+            </span>
+            <span className="rounded-full border border-gray-200 bg-white px-3 py-1 font-medium text-gray-700">
+              {stats!.reviewed} manual findings logged
+            </span>
             {nonCompliantCount > 0 && (
-              <> | <span className="font-semibold">{nonCompliantCount}</span> non-compliant</>
+              <span className="rounded-full border border-orange-200 bg-white px-3 py-1 font-medium text-orange-700">
+                {nonCompliantCount} non-compliant
+              </span>
             )}
             {taxDelinquentCount > 0 && (
-              <> | <span className="font-semibold">{taxDelinquentCount}</span> need outreach</>
+              <span className="rounded-full border border-amber-200 bg-white px-3 py-1 font-medium text-amber-700">
+                {taxDelinquentCount} need outreach
+              </span>
             )}
-          </span>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-gray-600">Photo coverage</span>
+                <span className="font-medium text-civic-blue">
+                  {photoCoveragePct}% ({imageryFetched} of {stats!.total})
+                </span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-gray-100">
+                <div
+                  className="h-2 rounded-full bg-civic-blue transition-all duration-500"
+                  style={{ width: `${photoCoveragePct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-gray-600">System triage</span>
+                <span className="font-medium text-civic-green">
+                  {systemTriagedPct}% ({detectionRan} of {stats!.total})
+                </span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-gray-100">
+                <div
+                  className="h-2 rounded-full bg-civic-green transition-all duration-500"
+                  style={{ width: `${systemTriagedPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-gray-600">Manual review</span>
+                <span className="font-medium text-gray-700">
+                  {manualReviewPct}% ({stats!.reviewed} of {stats!.total})
+                </span>
+              </div>
+              <div className="mt-2 h-2 rounded-full bg-gray-100">
+                <div
+                  className="h-2 rounded-full bg-gray-500 transition-all duration-500"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside className="rounded-xl border border-civic-green/20 bg-civic-green-pale/60 p-5 shadow-[0_1px_4px_rgba(46,125,50,0.08)]">
+          <div className="text-[11px] uppercase tracking-[0.18em] text-civic-green">Open manual review</div>
+          <div className="mt-3 font-heading text-4xl font-bold text-gray-900">{stats!.unreviewed}</div>
+          <p className="mt-2 text-sm text-gray-700">
+            Properties still need a human finding before the desk-review pass is complete.
+          </p>
           <Link
             href="/review?filter=unreviewed"
-            className="text-xs font-semibold text-amber-700 hover:underline shrink-0"
+            className="mt-4 inline-flex rounded border border-civic-green bg-civic-green px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-civic-green-light"
           >
-            Open Review Queue &rarr;
+            Open Manual Review
           </Link>
-        </div>
-      )}
-
-      {/* Review progress (compact) */}
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-medium text-gray-500 shrink-0">Manual Review Progress</span>
-        <div className="h-2 flex-1 rounded-full bg-gray-100">
-          <div
-            className="h-2 rounded-full bg-civic-green transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <span className="text-xs font-medium text-civic-green shrink-0">{pct}%</span>
-        <span className="text-xs text-gray-400 shrink-0 hidden sm:inline">
-          ({stats!.reviewed} with findings, {stats!.unreviewed} remaining)
-        </span>
+          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-lg border border-white/70 bg-white/80 px-3 py-3">
+              <div className="text-gray-500">Needs inspection</div>
+              <div className="mt-1 font-heading text-xl text-gray-900">{stats!.needs_inspection}</div>
+            </div>
+            <div className="rounded-lg border border-white/70 bg-white/80 px-3 py-3">
+              <div className="text-gray-500">Desk resolved</div>
+              <div className="mt-1 font-heading text-xl text-gray-900">{stats!.resolved}</div>
+            </div>
+          </div>
+        </aside>
       </div>
 
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-medium text-gray-500 shrink-0">Photo Coverage</span>
-        <div className="h-2 flex-1 rounded-full bg-gray-100">
-          <div
-            className="h-2 rounded-full bg-civic-blue transition-all duration-500"
-            style={{ width: `${photoCoveragePct}%` }}
-          />
-        </div>
-        <span className="text-xs font-medium text-civic-blue shrink-0">{photoCoveragePct}%</span>
-        <span className="text-xs text-gray-400 shrink-0 hidden sm:inline">
-          ({imageryFetched} with imagery, {detectionRan} system-triaged)
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-2">
-        <StatCard
-          label="Photo Ready"
-          value={`${photoCoveragePct}%`}
-          subtitle={`${imageryFetched} of ${stats!.total} with imagery`}
-          accentColor="#1565C0"
-          href="/processing"
-        />
-        <StatCard
-          label="System Triaged"
-          value={`${systemTriagedPct}%`}
-          subtitle={`${detectionRan} of ${stats!.total} processed`}
-          accentColor="#2E7D32"
-          href="/processing"
-        />
-      </div>
-
-      {/* Summary stats row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <StatCard
           label="Total Properties"
           value={stats!.total}
           accentColor="#9CA3AF"
+          subtitle="Current county list"
           href="/review?filter=all"
         />
         <StatCard
           label="Resolved (Desk)"
           value={stats!.resolved}
           accentColor="#2E7D32"
+          subtitle="Manual finding logged"
           href="/review?filter=resolved"
         />
         <StatCard
           label="Needs Inspection"
           value={stats!.needs_inspection}
           accentColor="#EA580C"
+          subtitle="Still needs a field visit"
           href="/review?filter=inconclusive"
           highlight={highlightInspection && stats!.needs_inspection > 0}
-        />
-        <StatCard
-          label="Manual Review Remaining"
-          value={stats!.unreviewed}
-          accentColor="#D1D5DB"
-          href="/review?filter=unreviewed"
-          highlight={!highlightInspection && stats!.unreviewed > 0}
         />
       </div>
 

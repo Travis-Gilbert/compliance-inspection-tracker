@@ -27,16 +27,16 @@ const MAP_ZOOM = 11;
 
 const COVERAGE_META = {
   before_after: {
-    label: "Before + Current",
+    label: "Historical Ready",
     color: "#2E7D32",
     bg: "#E8F5E9",
-    description: "Historical and current Street View available.",
+    description: "Historical and current Street View are both available.",
   },
   current_only: {
-    label: "Current Only",
+    label: "Needs Before Photo",
     color: "#1565C0",
     bg: "#E3F2FD",
-    description: "Current Street View available, no historical image cached yet.",
+    description: "Current Street View is available, but a historical comparison photo still needs to be pulled in.",
   },
   satellite_only: {
     label: "Satellite Only",
@@ -204,14 +204,6 @@ export default function ManagementCoverageMap({
       return;
     }
 
-    if (!activeProperty.closing_date) {
-      setHistoricalState((prev) => ({
-        ...prev,
-        [activeProperty.id]: { status: "unavailable" },
-      }));
-      return;
-    }
-
     let cancelled = false;
     setHistoricalState((prev) => ({
       ...prev,
@@ -293,9 +285,46 @@ export default function ManagementCoverageMap({
   const activeDetection = activeProperty
     ? DETECTION_LABELS[activeProperty.detection_label]
     : null;
+  const summaryCards = [
+    {
+      label: "Covered",
+      value: coverageSummary.covered,
+      detail: `${coverageRate}% of the county list is visible on the photo map`,
+      accent: "#2E7D32",
+      bg: "#F7FBF7",
+    },
+    {
+      label: "Historical Ready",
+      value: coverageSummary.before_after,
+      detail: "Historical and current Street View are both ready",
+      accent: "#2E7D32",
+      bg: "#F7FBF7",
+    },
+    {
+      label: "Needs Before Photo",
+      value: coverageSummary.current_only,
+      detail: "Current Street View exists, but the earlier image is still missing",
+      accent: "#1565C0",
+      bg: "#F7FAFF",
+    },
+    {
+      label: "Satellite Only",
+      value: coverageSummary.satellite_only,
+      detail: "No Street View image is available yet",
+      accent: "#F57F17",
+      bg: "#FFF8F0",
+    },
+    {
+      label: "System Triaged",
+      value: systemTriaged,
+      detail: `${systemTriagedRate}% triaged, ${humanReviewRate}% human-reviewed`,
+      accent: "#0F766E",
+      bg: "#F0FDFA",
+    },
+  ];
 
   return (
-    <section className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+    <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_1px_4px_rgba(15,23,42,0.04)]">
       <div className="border-b border-gray-200 px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -303,7 +332,10 @@ export default function ManagementCoverageMap({
               County Photo Coverage
             </h3>
             <p className="mt-1 text-sm text-gray-600">
-              Hover or click a property to inspect current coverage, compare historical versus current imagery, and track system triage readiness.
+              Use the county map to spot photo gaps, open a parcel, and compare the timeline before assigning a finding.
+              {coverageSummary.ungeocoded > 0 && (
+                <> {coverageSummary.ungeocoded} records still need geocoding before they can appear here.</>
+              )}
             </p>
           </div>
 
@@ -323,16 +355,13 @@ export default function ManagementCoverageMap({
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          {[
-            { label: "Covered", value: `${coverageRate}%`, detail: `${coverageSummary.covered} of ${totalProperties}` },
-            { label: "Before + Current", value: coverageSummary.before_after, detail: "Full photo comparison ready" },
-            { label: "Current Only", value: coverageSummary.current_only, detail: "Current Street View only" },
-            { label: "Satellite Only", value: coverageSummary.satellite_only, detail: "No Street View image yet" },
-            { label: "Not Geocoded", value: coverageSummary.ungeocoded, detail: "Not represented on the county map" },
-            { label: "System Triaged", value: `${systemTriagedRate}%`, detail: `${systemTriaged} triaged, ${humanReviewRate}% human-reviewed` },
-          ].map((card) => (
-            <div key={card.label} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {summaryCards.map((card) => (
+            <div
+              key={card.label}
+              className="rounded-xl border px-3 py-3"
+              style={{ borderColor: `${card.accent}33`, backgroundColor: card.bg }}
+            >
               <div className="text-[11px] uppercase tracking-wide text-gray-500">{card.label}</div>
               <div className="mt-1 font-heading text-2xl font-bold text-gray-900">{card.value}</div>
               <div className="mt-1 text-xs text-gray-500">{card.detail}</div>
@@ -529,7 +558,7 @@ export default function ManagementCoverageMap({
 
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <div className="text-xs uppercase tracking-wide text-gray-400">Before and After</div>
+                    <div className="text-xs uppercase tracking-wide text-gray-400">Photo Timeline</div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <ImagePanel

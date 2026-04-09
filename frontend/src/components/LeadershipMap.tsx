@@ -196,13 +196,6 @@ export default function LeadershipMap() {
     if (currentStatus === "loading" || currentStatus === "ready" || currentStatus === "unavailable") {
       return;
     }
-    if (!selectedProperty.closing_date) {
-      setHistoricalState((prev) => ({
-        ...prev,
-        [selectedProperty.id]: { status: "unavailable" },
-      }));
-      return;
-    }
 
     let cancelled = false;
     setHistoricalState((prev) => ({
@@ -438,11 +431,15 @@ export default function LeadershipMap() {
             </div>
 
             <div>
-              <h4 className="font-heading text-sm font-semibold text-gray-900 mb-2">Before and After</h4>
+              <h4 className="font-heading text-sm font-semibold text-gray-900 mb-2">Photo Timeline</h4>
               <div className="grid grid-cols-2 gap-2">
                 <ImagePanel
-                  src={selectedProperty.streetview_historical_path ? getImageUrl(selectedProperty.id, "streetview_historical") : ""}
-                  label={`Historical ${selectedProperty.streetview_historical_date || ""}`.trim()}
+                  src={
+                    selectedProperty.streetview_historical_path || historicalState[selectedProperty.id]?.status === "ready"
+                      ? getImageUrl(selectedProperty.id, "streetview_historical")
+                      : ""
+                  }
+                  label={`Historical ${selectedProperty.streetview_historical_date || historicalState[selectedProperty.id]?.date || ""}`.trim()}
                   fallback="Historical Street View unavailable"
                   loading={historicalState[selectedProperty.id]?.status === "loading"}
                 />

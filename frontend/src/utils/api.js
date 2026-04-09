@@ -1,4 +1,8 @@
-const rawBase = import.meta.env.VITE_API_BASE_URL ?? "";
+const PRODUCTION_API_FALLBACK = "https://backend-production-3996.up.railway.app";
+const isLocalHost =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
+const rawBase = import.meta.env.VITE_API_BASE_URL ?? (isLocalHost ? "" : PRODUCTION_API_FALLBACK);
 const BASE = rawBase.endsWith("/") ? rawBase.slice(0, -1) : rawBase;
 
 function buildUrl(path) {

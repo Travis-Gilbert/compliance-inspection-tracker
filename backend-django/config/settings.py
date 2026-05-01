@@ -75,20 +75,15 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # Database
-# If DATABASE_URL is set, use it (Railway provides this for Postgres).
-# Otherwise fall back to SQLite for local dev.
-DATABASE_URL = env("DATABASE_URL", default="")
-if DATABASE_URL:
-    DATABASES = {
-        "default": env.db("DATABASE_URL"),
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+# Postgres with PostGIS is the project database foundation.
+DATABASE_URL = env(
+    "DATABASE_URL",
+    default="postgres://localhost:5432/compliance_tracker",
+)
+DATABASES = {
+    "default": env.db_url_config(DATABASE_URL),
+}
+DATABASES["default"]["ENGINE"] = "django.db.backends.postgresql"
 
 AUTH_PASSWORD_VALIDATORS = []
 

@@ -1,4 +1,13 @@
+import builtins
+
+from django.core.validators import FileExtensionValidator
 from django.db import models
+from django.db.models import Q
+
+
+def property_photo_upload_to(instance, filename):
+    side = instance.side or "evidence"
+    return f"property_photos/{instance.property_id}/{side}/{filename}"
 
 
 class Property(models.Model):
@@ -129,6 +138,96 @@ class Property(models.Model):
             "visibly_renovated", "occupied_maintained",
             "partial_progress", "appears_vacant", "structure_gone",
         }
+
+    @property
+    def manual_compliance_outcome(self):
+        if not self.finding:
+            return "pending"
+
+        program = (self.program or "").strip().lower()
+
+        if self.finding == "inconclusive":
+            return "needs_inspection"
+
+        if program == "demolition":
+            return "compliant" if self.finding == "structure_gone" else "non_compliant"
+
+        if self.finding == "structure_gone":
+            return "non_compliant"
+        if self.finding in {"visibly_renovated", "occupied_maintained"}:
+            return "compliant"
+        if self.finding == "partial_progress":
+            return "in_progress"
+        if self.finding == "appears_vacant":
+            return "non_compliant"
+
+        return "unknown"
+
+
+class PropertyPhoto(models.Model):
+    """Uploaded before and after evidence for a property."""
+
+    SIDE_CHOICES = [
+        ("before", "Before"),
+        ("after", "After"),
+    ]
+    PROXIMITY_CHOICES = [
+        ("unlocated", "Unlocated"),
+        ("near_property", "Near Property"),
+        ("nearby", "Nearby"),
+        ("outside_property_area", "Outside Property Area"),
+    ]
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="photos",
+    )
+    side = models.CharField(max_length=10, choices=SIDE_CHOICES, db_index=True)
+    image = models.ImageField(
+        upload_to=property_photo_upload_to,
+        validators=[FileExtensionValidator(["jpg", "jpeg", "png", "webp"])],
+    )
+    original_filename = models.CharField(max_length=255, default="", blank=True)
+    caption = models.CharField(max_length=255, default="", blank=True)
+    source = models.CharField(max_length=50, default="manual_upload", blank=True)
+    is_primary = models.BooleanField(default=False, db_index=True)
+    photo_date = models.DateField(null=True, blank=True)
+    photo_latitude = models.FloatField(null=True, blank=True)
+    photo_longitude = models.FloatField(null=True, blank=True)
+    distance_from_property_meters = models.FloatField(null=True, blank=True)
+    proximity_status = models.CharField(
+        max_length=30,
+        choices=PROXIMITY_CHOICES,
+        default="unlocated",
+        db_index=True,
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["side", "-is_primary", "-uploaded_at"]
+        indexes = [
+            models.Index(fields=["property", "side", "is_primary"]),
+            models.Index(fields=["proximity_status"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["property", "side"],
+                condition=Q(is_primary=True),
+                name="one_primary_photo_per_property_side",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_side_display()} photo for {self.property.address}"
+
+    @builtins.property
+    def public_url(self):
+        if not self.image:
+            return ""
+        return self.image.url
 
 
 class Communication(models.Model):

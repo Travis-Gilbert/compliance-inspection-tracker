@@ -64,11 +64,17 @@ const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBa
           />
         ))}
         <div className="flex-1 min-w-[140px] ml-1">
+          <label htmlFor="review-search" className="sr-only">
+            Search address, parcel, or buyer
+          </label>
           <input
+            id="review-search"
+            name="review-search"
+            autoComplete="off"
             ref={searchRef}
             value={filters.search}
             onChange={(e) => onChange({ search: e.target.value })}
-            placeholder="Search address, parcel, buyer..."
+            placeholder="Search address, parcel, buyer…"
             className="w-full rounded border border-gray-200 px-2.5 py-1.5 text-xs"
           />
         </div>
@@ -89,6 +95,8 @@ const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBa
       {expanded && (
         <div className="flex flex-wrap gap-2 pt-1">
           <select
+            name="review-sort"
+            aria-label="Sort review queue"
             value={filters.sort}
             onChange={(e) => onChange({ sort: e.target.value })}
             className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
@@ -99,6 +107,8 @@ const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBa
           </select>
 
           <select
+            name="review-program"
+            aria-label="Filter by program"
             value={filters.program}
             onChange={(e) => onChange({ program: e.target.value })}
             className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
@@ -110,6 +120,8 @@ const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBa
           </select>
 
           <select
+            name="review-detection"
+            aria-label="Filter by detection"
             value={filters.detection}
             onChange={(e) => onChange({ detection: e.target.value })}
             className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
@@ -120,6 +132,8 @@ const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBa
           </select>
 
           <select
+            name="review-compliance"
+            aria-label="Filter by compliance"
             value={filters.compliance}
             onChange={(e) => onChange({ compliance: e.target.value })}
             className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"
@@ -131,6 +145,8 @@ const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(function FilterBa
           </select>
 
           <select
+            name="review-tax"
+            aria-label="Filter by tax status"
             value={filters.tax}
             onChange={(e) => onChange({ tax: e.target.value })}
             className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700"

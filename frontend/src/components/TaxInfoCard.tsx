@@ -20,17 +20,17 @@ export default function TaxInfoCard({
     color: "#757575",
   };
 
-  const borderColor =
+  const statusTone =
     taxStatus === "delinquent"
-      ? "border-l-red-600"
+      ? "border-red-200 bg-red-50"
       : taxStatus === "current"
-        ? "border-l-civic-green"
+        ? "border-civic-green/20 bg-civic-green-pale"
         : taxStatus === "payment_plan"
-          ? "border-l-yellow-600"
-          : "border-l-gray-300";
+          ? "border-yellow-200 bg-yellow-50"
+          : "border-gray-200 bg-white";
 
   return (
-    <div className={`rounded-lg border border-gray-200 border-l-4 ${borderColor} bg-white p-4`}>
+    <div className={`rounded-lg border ${statusTone} p-4`}>
       <div className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-3">Tax Information</div>
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div>

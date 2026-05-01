@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import GlobalAddressSearch from "@/components/GlobalAddressSearch";
 
 const NAV_GROUPS = [
   {
@@ -36,6 +37,17 @@ const NAV_GROUPS = [
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M8 1.5C5.5 1.5 3.5 3.5 3.5 6c0 3.5 4.5 8.5 4.5 8.5s4.5-5 4.5-8.5c0-2.5-2-4.5-4.5-4.5z" />
             <circle cx="8" cy="6" r="1.5" />
+          </svg>
+        ),
+      },
+      {
+        path: "/before-after",
+        label: "Before and After",
+        icon: (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="1.5" y="3" width="5.5" height="10" rx="1" />
+            <rect x="9" y="3" width="5.5" height="10" rx="1" />
+            <path d="M4.25 6.5h.01M11.75 6.5h.01M3 10h2.5M10.5 10H13" />
           </svg>
         ),
       },
@@ -90,6 +102,9 @@ export function Sidebar() {
         <p className="text-xs text-gray-500 mt-0.5">
           Genesee County Land Bank
         </p>
+        <div className="mt-3">
+          <GlobalAddressSearch />
+        </div>
       </div>
 
       {/* Desktop: vertical nav with groups */}
@@ -108,13 +123,13 @@ export function Sidebar() {
                   <Link
                     key={item.path}
                     href={item.path}
-                    className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                    className={`flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-civic-green focus-visible:ring-offset-2 ${
                       isActive
-                        ? "border-l-2 border-civic-green bg-civic-green-pale text-civic-green"
+                        ? "bg-civic-green-pale text-civic-green ring-1 ring-civic-green/20"
                         : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                     }`}
                   >
-                    <span className="shrink-0 opacity-70">{item.icon}</span>
+                    <span className="shrink-0 opacity-70" aria-hidden="true">{item.icon}</span>
                     {item.label}
                   </Link>
                 );
@@ -134,13 +149,13 @@ export function Sidebar() {
             <Link
               key={item.path}
               href={item.path}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-civic-green focus-visible:ring-offset-2 ${
                 isActive
                   ? "bg-civic-green-pale text-civic-green"
                   : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
               }`}
             >
-              <span className="shrink-0 opacity-70">{item.icon}</span>
+              <span className="shrink-0 opacity-70" aria-hidden="true">{item.icon}</span>
               {item.label}
             </Link>
           );

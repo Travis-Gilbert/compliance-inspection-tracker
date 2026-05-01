@@ -19,13 +19,20 @@ export default function StatCard({
 }: StatCardProps) {
   const inner = (
     <>
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-gray-500">
+        <span
+          className="h-2 w-2 rounded-full"
+          style={{ backgroundColor: accentColor }}
+          aria-hidden="true"
+        />
+        {label}
+      </div>
       <div className="mt-1 font-heading text-2xl font-bold text-gray-900">{value}</div>
       {subtitle && <div className="mt-0.5 text-xs text-gray-400">{subtitle}</div>}
     </>
   );
 
-  const baseClasses = `rounded-lg border border-gray-200 border-l-4 p-4 transition-colors ${
+  const baseClasses = `rounded-lg border border-gray-200 p-4 transition-colors ${
     highlight ? "bg-amber-50" : "bg-white"
   }`;
 
@@ -34,7 +41,6 @@ export default function StatCard({
       <Link
         href={href}
         className={`${baseClasses} block hover:border-gray-300`}
-        style={{ borderLeftColor: accentColor }}
       >
         {inner}
       </Link>
@@ -42,7 +48,7 @@ export default function StatCard({
   }
 
   return (
-    <div className={baseClasses} style={{ borderLeftColor: accentColor }}>
+    <div className={baseClasses}>
       {inner}
     </div>
   );

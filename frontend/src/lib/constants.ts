@@ -34,6 +34,7 @@ export const NAV_ITEMS = [
   { path: "/", label: "Dashboard", shortLabel: "DB" },
   { path: "/review", label: "Review Queue", shortLabel: "RQ" },
   { path: "/map", label: "Compliance Map", shortLabel: "MP" },
+  { path: "/before-after", label: "Before and After", shortLabel: "BA" },
   { path: "/import", label: "Import", shortLabel: "IM" },
   { path: "/export", label: "Export", shortLabel: "EX" },
   { path: "/processing", label: "Processing", shortLabel: "PR" },

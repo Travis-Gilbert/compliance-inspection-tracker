@@ -180,7 +180,7 @@ export default function ImportPage() {
           }`}
         >
           {importing
-            ? "Importing..."
+            ? "Importing…"
             : files.length > 0
               ? `Import ${files.length} File${files.length === 1 ? "" : "s"}`
               : "Import Text"}
@@ -200,7 +200,7 @@ export default function ImportPage() {
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-civic-green border-t-transparent" />
             {importProgress
               ? `Importing ${importProgress.current} of ${importProgress.total}: ${importProgress.name}`
-              : `Importing ${files.length > 0 ? "selected files" : "pasted text"}...`}
+              : `Importing ${files.length > 0 ? "selected files" : "pasted text"}…`}
           </div>
         )}
       </div>

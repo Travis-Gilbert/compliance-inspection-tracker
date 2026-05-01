@@ -74,18 +74,17 @@ export default function Dashboard() {
     );
   }
 
-  const pct = stats?.percent_reviewed || 0;
   const imageryFetched = stats?.imagery_fetched || 0;
   const detectionRan = stats?.detection_ran || 0;
+  const photoReady = stats?.photo_ready || 0;
+  const compliantReviewed = stats?.compliant_reviewed || 0;
+  const nonCompliantReviewed = stats?.non_compliant_reviewed || 0;
+  const inProgressReviewed = stats?.in_progress_reviewed || 0;
   const photoCoveragePct = stats!.total > 0
-    ? Math.round((imageryFetched / stats!.total) * 100)
+    ? Math.round((photoReady / stats!.total) * 100)
     : 0;
-  const systemTriagedPct = stats!.total > 0
-    ? Math.round((detectionRan / stats!.total) * 100)
-    : 0;
-  const manualReviewPct = stats!.total > 0
-    ? Math.round((stats!.reviewed / stats!.total) * 100)
-    : 0;
+  const manualReviewPct = stats!.percent_reviewed || 0;
+  const compliantReviewedPct = stats!.compliant_percent_reviewed || 0;
   const highlightInspection = stats!.needs_inspection >= stats!.unreviewed;
 
   const laneCounts: Record<string, number> = {
@@ -96,27 +95,25 @@ export default function Dashboard() {
     unprocessed: stats!.unreviewed_by_detection?.unprocessed || 0,
   };
 
-  const nonCompliantCount = stats!.by_compliance_status?.non_compliant || 0;
-  const taxDelinquentCount = stats!.by_compliance_status?.needs_outreach || 0;
   const allReviewed = stats!.unreviewed === 0 && stats!.total > 0;
-  const allPhotoReady = imageryFetched === stats!.total && detectionRan === stats!.total && stats!.total > 0;
+  const allPhotoReady = photoReady === stats!.total && stats!.total > 0;
   const overviewHeadline = allReviewed
-    ? `All ${stats!.total} properties have a manual finding recorded.`
+    ? `${stats!.reviewed} reviewed, 0 pending.`
     : allPhotoReady
-      ? `${imageryFetched} properties are photo-ready, ${stats!.unreviewed} still need a manual finding.`
-      : `${imageryFetched} properties are photo-ready and ${detectionRan} have system triage.`;
+      ? `${stats!.reviewed} reviewed, ${stats!.unreviewed} pending. Photo evidence is ready.`
+      : `${stats!.reviewed} reviewed, ${stats!.unreviewed} pending.`;
   const overviewCopy = allReviewed
-    ? "Desk review is complete for the current county list. Use the queue for spot checks, updates, and export."
+    ? `${compliantReviewed} reviewed properties are program-aware compliant. Use export for the desk-review handoff.`
     : allPhotoReady
-      ? "The imagery and automated triage pass are complete, so the work left is human judgment and field follow-up."
-      : "Imagery and system triage are still filling in. The queue is best used for the strongest open signals first.";
+      ? "The evidence set is ready. The remaining work is manual judgment, notes, and field follow-up decisions."
+      : "Use the queue and gallery to complete photo evidence before treating compliance percentages as meaningful.";
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-5">
       <div>
-        <h2 className="font-heading text-2xl font-bold text-gray-900">Management Dashboard</h2>
+          <h2 className="font-heading text-2xl font-bold text-gray-900">Operations Dashboard</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Countywide photo coverage, review progress, and compliance signals
+          Manual review progress, photo readiness, and map coverage
         </p>
       </div>
 
@@ -131,10 +128,10 @@ export default function Dashboard() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_320px]">
-        <section className="rounded-xl border border-gray-200 bg-[linear-gradient(135deg,#FAFAF5_0%,#FFFFFF_62%,#F3F8F3_100%)] p-5 shadow-[0_1px_4px_rgba(15,23,42,0.04)]">
+        <section className="rounded border border-gray-200 bg-white p-5 shadow-[0_1px_4px_rgba(15,23,42,0.04)]">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-gray-500">County overview</div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500">County overview</div>
               <h3 className="mt-2 font-heading text-2xl font-semibold leading-tight text-gray-900">
                 {overviewHeadline}
               </h3>
@@ -152,22 +149,22 @@ export default function Dashboard() {
 
           <div className="mt-4 flex flex-wrap gap-2 text-xs">
             <span className="rounded-full border border-civic-blue/20 bg-white px-3 py-1 font-medium text-civic-blue">
-              {imageryFetched} photo ready
+              {photoReady} photo-ready
             </span>
             <span className="rounded-full border border-civic-green/20 bg-white px-3 py-1 font-medium text-civic-green">
-              {detectionRan} system triaged
+              {compliantReviewed} compliant among reviewed
             </span>
             <span className="rounded-full border border-gray-200 bg-white px-3 py-1 font-medium text-gray-700">
-              {stats!.reviewed} manual findings logged
+              {stats!.reviewed} manual findings
             </span>
-            {nonCompliantCount > 0 && (
+            {nonCompliantReviewed > 0 && (
               <span className="rounded-full border border-orange-200 bg-white px-3 py-1 font-medium text-orange-700">
-                {nonCompliantCount} non-compliant
+                {nonCompliantReviewed} non-compliant
               </span>
             )}
-            {taxDelinquentCount > 0 && (
-              <span className="rounded-full border border-amber-200 bg-white px-3 py-1 font-medium text-amber-700">
-                {taxDelinquentCount} need outreach
+            {inProgressReviewed > 0 && (
+              <span className="rounded-full border border-civic-blue/20 bg-white px-3 py-1 font-medium text-civic-blue">
+                {inProgressReviewed} in progress
               </span>
             )}
           </div>
@@ -175,9 +172,9 @@ export default function Dashboard() {
           <div className="mt-5 space-y-3">
             <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-3">
               <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium text-gray-600">Photo coverage</span>
+                <span className="font-medium text-gray-600">Photo-ready records</span>
                 <span className="font-medium text-civic-blue">
-                  {photoCoveragePct}% ({imageryFetched} of {stats!.total})
+                  {photoCoveragePct}% ({photoReady} of {stats!.total})
                 </span>
               </div>
               <div className="mt-2 h-2 rounded-full bg-gray-100">
@@ -190,15 +187,15 @@ export default function Dashboard() {
 
             <div className="rounded-lg border border-white/80 bg-white/80 px-3 py-3">
               <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-medium text-gray-600">System triage</span>
+                <span className="font-medium text-gray-600">Compliant among reviewed</span>
                 <span className="font-medium text-civic-green">
-                  {systemTriagedPct}% ({detectionRan} of {stats!.total})
+                  {compliantReviewedPct}% ({compliantReviewed} of {stats!.reviewed})
                 </span>
               </div>
               <div className="mt-2 h-2 rounded-full bg-gray-100">
                 <div
                   className="h-2 rounded-full bg-civic-green transition-all duration-500"
-                  style={{ width: `${systemTriagedPct}%` }}
+                  style={{ width: `${compliantReviewedPct}%` }}
                 />
               </div>
             </div>
@@ -213,15 +210,15 @@ export default function Dashboard() {
               <div className="mt-2 h-2 rounded-full bg-gray-100">
                 <div
                   className="h-2 rounded-full bg-gray-500 transition-all duration-500"
-                  style={{ width: `${pct}%` }}
+                  style={{ width: `${manualReviewPct}%` }}
                 />
               </div>
             </div>
           </div>
         </section>
 
-        <aside className="rounded-xl border border-civic-green/20 bg-civic-green-pale/60 p-5 shadow-[0_1px_4px_rgba(46,125,50,0.08)]">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-civic-green">Open manual review</div>
+        <aside className="rounded border border-civic-green/20 bg-civic-green-pale/60 p-5 shadow-[0_1px_4px_rgba(46,125,50,0.08)]">
+          <div className="text-[11px] uppercase tracking-wide text-civic-green">Pending manual review</div>
           <div className="mt-3 font-heading text-4xl font-bold text-gray-900">{stats!.unreviewed}</div>
           <p className="mt-2 text-sm text-gray-700">
             Properties still need a human finding before the desk-review pass is complete.
@@ -288,7 +285,7 @@ export default function Dashboard() {
             onClick={() => setComplianceExpanded(!complianceExpanded)}
             className="w-full flex items-center justify-between p-5 text-left"
           >
-            <h3 className="font-heading font-semibold text-gray-900">Compliance Status</h3>
+            <h3 className="font-heading font-semibold text-gray-900">Imported Compliance Status</h3>
             <svg
               className={`h-4 w-4 text-gray-400 transition-transform ${complianceExpanded ? "rotate-180" : ""}`}
               fill="none"
@@ -306,8 +303,8 @@ export default function Dashboard() {
                   return (
                     <div
                       key={status.value}
-                      className="rounded-lg border border-gray-200 px-3 py-3 text-center"
-                      style={{ borderLeftWidth: 4, borderLeftColor: status.color }}
+                      className="rounded-lg border px-3 py-3 text-center"
+                      style={{ borderColor: `${status.color}33`, backgroundColor: status.bg }}
                     >
                       <div className="font-heading text-xl font-bold" style={{ color: status.color }}>{count}</div>
                       <div className="mt-1 text-xs text-gray-600">{status.label}</div>

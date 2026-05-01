@@ -69,6 +69,16 @@ export const getPropertyClusters = (params: Record<string, string> = {}) => {
   return request(`/api/properties/clusters?${qs}`).then((r) => r.json());
 };
 
+export const searchProperties = (query: string, limit = 8) => {
+  const qs = new URLSearchParams({ q: query, limit: String(limit) }).toString();
+  return request(`/api/properties/search?${qs}`).then((r) => r.json());
+};
+
+export const getGalleryProperties = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/properties/gallery?${qs}`).then((r) => r.json());
+};
+
 export const getProperty = (id: number | string) =>
   request(`/api/properties/${id}`).then((r) => r.json());
 
@@ -127,6 +137,47 @@ export const fetchHistoricalImagery = (propertyId: number | string) =>
 
 export const getImageUrl = (propertyId: number | string, type: string) =>
   resolveApiUrl(`/api/imagery/image/${propertyId}/${type}`);
+
+export const getMediaUrl = (path: string | null | undefined) => {
+  if (!path) return "";
+  return resolveApiUrl(path.startsWith("/") ? path : `/${path}`);
+};
+
+export const getPropertyPhotos = (propertyId: number | string) =>
+  request(`/api/properties/${propertyId}/photos`).then((r) => r.json());
+
+export const uploadPropertyPhoto = async (
+  propertyId: number | string,
+  data: {
+    file: File;
+    side: "before" | "after";
+    caption?: string;
+    photoDate?: string;
+    isPrimary?: boolean;
+    photoLatitude?: number;
+    photoLongitude?: number;
+  },
+) => {
+  const formData = new FormData();
+  formData.append("image", data.file);
+  formData.append("side", data.side);
+  formData.append("caption", data.caption || "");
+  formData.append("photo_date", data.photoDate || "");
+  formData.append("is_primary", data.isPrimary === false ? "false" : "true");
+  if (data.photoLatitude != null) {
+    formData.append("photo_latitude", String(data.photoLatitude));
+  }
+  if (data.photoLongitude != null) {
+    formData.append("photo_longitude", String(data.photoLongitude));
+  }
+
+  const res = await fetch(resolveApiUrl(`/api/properties/${propertyId}/photos`), {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res, "Photo upload failed"));
+  return res.json();
+};
 
 // Detection
 export const runDetectionBatch = (limit = 50) =>

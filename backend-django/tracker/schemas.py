@@ -133,9 +133,31 @@ class PropertyResponse(Schema):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     communication_count: int = 0
+    manual_compliance_outcome: str = "pending"
+    photo_summary: dict = Field(default_factory=dict)
+    primary_before_photo: Optional[dict] = None
+    primary_after_photo: Optional[dict] = None
 
     class Config:
         from_attributes = True
+
+
+class PropertyPhotoResponse(Schema):
+    id: int
+    property_id: int
+    side: str
+    image_url: str
+    original_filename: str = ""
+    caption: str = ""
+    source: str = "manual_upload"
+    is_primary: bool = False
+    photo_date: Optional[date] = None
+    photo_latitude: Optional[float] = None
+    photo_longitude: Optional[float] = None
+    distance_from_property_meters: Optional[float] = None
+    proximity_status: str = "unlocated"
+    metadata: dict = Field(default_factory=dict)
+    uploaded_at: Optional[datetime] = None
 
 
 # --- Stats ---
@@ -157,6 +179,13 @@ class StatsResponse(Schema):
     # New
     by_compliance_status: dict = Field(default_factory=dict)
     percent_reviewed: float = 0.0
+    compliant_reviewed: int = 0
+    non_compliant_reviewed: int = 0
+    in_progress_reviewed: int = 0
+    compliant_percent_reviewed: float = 0.0
+    photo_ready: int = 0
+    uploaded_before_count: int = 0
+    uploaded_after_count: int = 0
 
 
 # --- Import ---

@@ -5,7 +5,7 @@ __pycache__/
 venv/
 .venv/
 
-# Backend data (SQLite DB + cached images)
+# Backend data and cached images
 backend/data/
 
 # Environment
@@ -17,7 +17,7 @@ node_modules/
 dist/
 .next/
 
-# SQLite databases
+# Local databases
 *.sqlite3
 
 # OS

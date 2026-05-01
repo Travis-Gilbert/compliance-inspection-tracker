@@ -6,7 +6,7 @@ const LeadershipMap = dynamic(() => import("@/components/LeadershipMap"), {
   ssr: false,
   loading: () => (
     <div className="fixed inset-0 bg-warm-50 flex items-center justify-center">
-      <div className="text-sm text-gray-500">Loading map...</div>
+      <div className="text-sm text-gray-500">Loading map…</div>
     </div>
   ),
 });

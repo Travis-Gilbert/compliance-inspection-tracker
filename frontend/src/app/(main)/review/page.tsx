@@ -163,6 +163,17 @@ function ReviewQueueInner() {
     }
   }, [selectedProperty, notes]);
 
+  const reloadSelectedProperty = useCallback(async () => {
+    if (selectedId == null) return;
+    try {
+      const data: Property = await getProperty(selectedId);
+      setSelectedProperty(data);
+      setNotes(data.notes || "");
+    } catch {
+      await refresh();
+    }
+  }, [selectedId, refresh]);
+
   const toggleCheck = useCallback((id: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -313,6 +324,7 @@ function ReviewQueueInner() {
             onFindingAssign={(finding) => handleFindingAssign(selectedProperty.id, finding)}
             saving={saving}
             notice={notice}
+            onPhotosChanged={reloadSelectedProperty}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-8 text-center">

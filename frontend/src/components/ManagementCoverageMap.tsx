@@ -117,7 +117,7 @@ function ImagePanel({
   if (loading) {
     return (
       <div className="flex aspect-[4/3] w-full items-center justify-center rounded border border-gray-200 bg-gray-100 text-xs text-gray-500">
-        Loading image...
+        Loading image…
       </div>
     );
   }
@@ -129,6 +129,9 @@ function ImagePanel({
           <img
             src={src}
             alt={label}
+            width={640}
+            height={480}
+            loading="lazy"
             className="aspect-[4/3] w-full object-cover"
             onError={() => setErrored(true)}
           />
@@ -374,7 +377,7 @@ export default function ManagementCoverageMap({
         <div className="relative min-h-[500px] border-b border-gray-200 lg:border-b-0 lg:border-r">
           {loading ? (
             <div className="flex h-full items-center justify-center bg-gray-50 text-sm text-gray-500">
-              Loading county coverage map...
+              Loading county coverage map…
             </div>
           ) : error ? (
             <div className="flex h-full items-center justify-center bg-red-50 px-6 text-center text-sm text-red-700">

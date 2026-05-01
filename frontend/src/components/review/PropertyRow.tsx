@@ -38,9 +38,9 @@ export default function PropertyRow({
       }}
       className={`cursor-pointer border-b border-gray-100 px-3 py-2.5 transition-colors ${
         isSelected
-          ? "bg-civic-green-pale border-l-2 border-l-civic-green"
+          ? "bg-civic-green-pale ring-1 ring-inset ring-civic-green/30"
           : isFocused
-            ? "bg-gray-50 border-l-2 border-l-gray-300"
+            ? "bg-gray-50 ring-1 ring-inset ring-gray-300"
             : "hover:bg-gray-50"
       }`}
     >

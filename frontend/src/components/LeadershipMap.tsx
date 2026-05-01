@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CircleMarker, MapContainer, TileLayer, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, TileLayer, useMap } from "react-leaflet";
 import Link from "next/link";
 import "leaflet/dist/leaflet.css";
 import { getImageUrl, getMapProperties, fetchHistoricalImagery } from "@/lib/api";
@@ -99,7 +99,7 @@ function ImagePanel({
   if (loading) {
     return (
       <div className="w-full aspect-[4/3] bg-gray-100 rounded border border-gray-200 flex items-center justify-center text-xs text-gray-500">
-        Loading image...
+        Loading image…
       </div>
     );
   }
@@ -111,6 +111,9 @@ function ImagePanel({
           <img
             src={src}
             alt={label}
+            width={640}
+            height={480}
+            loading="lazy"
             className="w-full h-full object-cover"
             onError={() => setErrored(true)}
           />
@@ -134,6 +137,9 @@ export default function LeadershipMap() {
   const [programFilter, setProgramFilter] = useState("all");
   const [contactFilter, setContactFilter] = useState("all");
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showPins, setShowPins] = useState(true);
+  const [showCompliantDensity, setShowCompliantDensity] = useState(true);
+  const [showNonCompliantDensity, setShowNonCompliantDensity] = useState(true);
   const [historicalState, setHistoricalState] = useState<Record<number, any>>({});
   const [isMobile, setIsMobile] = useState(
     typeof window !== "undefined" ? window.innerWidth < 640 : false
@@ -276,6 +282,8 @@ export default function LeadershipMap() {
             </Link>
 
             <select
+              name="map-program"
+              aria-label="Filter map by program"
               value={programFilter}
               onChange={(event) => setProgramFilter(event.target.value)}
               className="text-xs border border-gray-300 rounded px-2 py-1.5 bg-white"
@@ -287,6 +295,8 @@ export default function LeadershipMap() {
             </select>
 
             <select
+              name="map-contact"
+              aria-label="Filter map by contact status"
               value={contactFilter}
               onChange={(event) => setContactFilter(event.target.value)}
               className="text-xs border border-gray-300 rounded px-2 py-1.5 bg-white"
@@ -308,15 +318,70 @@ export default function LeadershipMap() {
               Export Current View
             </button>
           </div>
+
+          <fieldset className="flex w-full flex-wrap gap-3 text-xs text-gray-700">
+            <legend className="sr-only">Map layers</legend>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={showPins}
+                onChange={(event) => setShowPins(event.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-civic-green focus:ring-civic-green"
+              />
+              Pins
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={showCompliantDensity}
+                onChange={(event) => setShowCompliantDensity(event.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-civic-green focus:ring-civic-green"
+              />
+              Compliant density
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={showNonCompliantDensity}
+                onChange={(event) => setShowNonCompliantDensity(event.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-civic-green focus:ring-civic-green"
+              />
+              Non-compliant density
+            </label>
+          </fieldset>
         </div>
       </div>
 
-      <div className="absolute inset-0 pt-[124px] sm:pt-[74px]">
+      <div className="absolute inset-0 pt-[178px] sm:pt-[126px]">
         <MapContainer center={MAP_CENTER} zoom={MAP_ZOOM} className="w-full h-full" zoomControl>
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <FlyToSelected property={selectedProperty} />
           {properties.map((property) => {
             if (property.latitude == null || property.longitude == null) return null;
+            const outcome = property.manual_compliance_outcome || "pending";
+            const isCompliant = outcome === "compliant";
+            const isNonCompliant = outcome === "non_compliant";
+            if (!showCompliantDensity && isCompliant) return null;
+            if (!showNonCompliantDensity && isNonCompliant) return null;
+            if (!isCompliant && !isNonCompliant) return null;
+            const color = isCompliant ? "#2E7D32" : "#E65100";
+            return (
+              <Circle
+                key={`density-${property.id}`}
+                center={[Number(property.latitude), Number(property.longitude)]}
+                radius={320}
+                pathOptions={{
+                  color,
+                  weight: 0,
+                  fillColor: color,
+                  fillOpacity: 0.14,
+                }}
+              />
+            );
+          })}
+          {properties.map((property) => {
+            if (property.latitude == null || property.longitude == null) return null;
+            if (!showPins) return null;
             const color = PROGRAM_COLORS[property.program] || "#455A64";
             const isSelected = selectedId === property.id;
             return (
@@ -338,25 +403,25 @@ export default function LeadershipMap() {
       </div>
 
       {loading && (
-        <div className="absolute left-4 top-[134px] z-[1000] rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 sm:top-[84px]">
-          Loading map data...
+        <div className="absolute left-4 top-[188px] z-[1000] rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 sm:top-[136px]">
+          Loading map data…
         </div>
       )}
 
       {error && (
-        <div className="absolute left-4 top-[134px] z-[1000] rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:top-[84px]">
+        <div className="absolute left-4 top-[188px] z-[1000] rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 sm:top-[136px]">
           {error}
         </div>
       )}
 
       {!loading && !error && properties.length === 0 && (
-        <div className="absolute left-4 top-[134px] z-[1000] rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 sm:top-[84px]">
+        <div className="absolute left-4 top-[188px] z-[1000] rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600 sm:top-[136px]">
           No geocoded properties match this view.
         </div>
       )}
 
-      <div className="absolute bottom-4 left-4 z-[1000] bg-white border border-gray-200 rounded px-3 py-2 text-[11px] text-gray-600">
-        Marker colors: Featured Homes (green), Ready for Rehab (blue), VIP Spotlight (brown), Demolition (red)
+      <div className="absolute bottom-4 left-4 z-[1000] max-w-xs rounded border border-gray-200 bg-white px-3 py-2 text-[11px] text-gray-600">
+        Pins show program. Density layers show manual compliant and non-compliant findings.
       </div>
 
       {selectedProperty && (
@@ -364,7 +429,7 @@ export default function LeadershipMap() {
           className={`absolute z-[1100] overflow-y-auto bg-white shadow-xl ${
             isMobile
               ? "bottom-0 left-0 right-0 h-[78vh] rounded-t-2xl border-t border-gray-200"
-              : "bottom-0 right-0 top-[74px] w-[430px] border-l border-gray-200"
+              : "bottom-0 right-0 top-[126px] w-[430px] border-l border-gray-200"
           }`}
         >
           <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-start justify-between gap-3">

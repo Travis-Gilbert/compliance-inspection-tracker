@@ -6,20 +6,22 @@ URL structure so the frontend api.ts client works without changes.
 """
 import asyncio
 import json as json_mod
+import math
 from datetime import date, datetime
 from typing import Optional
 
 from django.conf import settings
-from django.db import models
-from django.db.models import Count, Q, Avg, Min, Max, F, Value
+from django.db import models, transaction
+from django.db.models import Count, Exists, OuterRef, Q, Avg, Min, Max, F, Value
 from django.http import HttpResponse, StreamingHttpResponse, FileResponse
-from ninja import NinjaAPI, Router, Query, File, UploadedFile
+from ninja import NinjaAPI, Router, Query, File, Form, UploadedFile
 
-from tracker.models import Property, Communication, ImportBatch
+from tracker.models import Property, PropertyPhoto, Communication, ImportBatch
 from tracker.schemas import (
     PropertyCreate, PropertyUpdate, PropertyResponse,
     StatsResponse, ImportResult, BatchUpdateRequest,
     CommunicationCreate, CommunicationUpdate, CommunicationResponse,
+    PropertyPhotoResponse,
     RESOLVED_FINDINGS,
 )
 from tracker.services.csv_parser import parse_csv_text
@@ -124,6 +126,10 @@ def _property_to_dict(prop: Property, comm_count: int = 0) -> dict:
         "created_at": prop.created_at.isoformat() if prop.created_at else "",
         "updated_at": prop.updated_at.isoformat() if prop.updated_at else "",
         "communication_count": comm_count,
+        "manual_compliance_outcome": _manual_outcome_for(prop.program, prop.finding),
+        "photo_summary": {},
+        "primary_before_photo": None,
+        "primary_after_photo": None,
     }
     return data
 
@@ -139,6 +145,251 @@ def _qs_to_dicts(qs) -> list[dict]:
 
 def _resolved_values() -> set[str]:
     return RESOLVED_FINDINGS
+
+
+def _manual_outcome_for(program: str, finding: str) -> str:
+    if not finding:
+        return "pending"
+
+    normalized_program = (program or "").strip().lower()
+    if finding == "inconclusive":
+        return "needs_inspection"
+    if normalized_program == "demolition":
+        return "compliant" if finding == "structure_gone" else "non_compliant"
+    if finding == "structure_gone":
+        return "non_compliant"
+    if finding in {"visibly_renovated", "occupied_maintained"}:
+        return "compliant"
+    if finding == "partial_progress":
+        return "in_progress"
+    if finding == "appears_vacant":
+        return "non_compliant"
+    return "unknown"
+
+
+def _photo_to_dict(photo: PropertyPhoto) -> dict:
+    return {
+        "id": photo.id,
+        "property_id": photo.property_id,
+        "side": photo.side,
+        "image_url": photo.public_url,
+        "original_filename": photo.original_filename,
+        "caption": photo.caption,
+        "source": photo.source,
+        "is_primary": photo.is_primary,
+        "photo_date": photo.photo_date.isoformat() if photo.photo_date else None,
+        "photo_latitude": photo.photo_latitude,
+        "photo_longitude": photo.photo_longitude,
+        "distance_from_property_meters": photo.distance_from_property_meters,
+        "proximity_status": photo.proximity_status,
+        "metadata": photo.metadata or {},
+        "uploaded_at": photo.uploaded_at.isoformat() if photo.uploaded_at else None,
+    }
+
+
+def _photos_for_property(prop: Property) -> list[PropertyPhoto]:
+    prefetched = getattr(prop, "prefetched_photos", None)
+    if prefetched is not None:
+        return list(prefetched)
+    return list(prop.photos.all())
+
+
+def _photo_summary_from_photos(photos: list[PropertyPhoto]) -> dict:
+    before = [photo for photo in photos if photo.side == "before"]
+    after = [photo for photo in photos if photo.side == "after"]
+    primary_before = next((photo for photo in before if photo.is_primary), before[0] if before else None)
+    primary_after = next((photo for photo in after if photo.is_primary), after[0] if after else None)
+    return {
+        "before_count": len(before),
+        "after_count": len(after),
+        "total_count": len(photos),
+        "has_before": bool(before),
+        "has_after": bool(after),
+        "is_complete": bool(before and after),
+        "primary_before_photo": _photo_to_dict(primary_before) if primary_before else None,
+        "primary_after_photo": _photo_to_dict(primary_after) if primary_after else None,
+    }
+
+
+def _property_with_photo_data(prop: Property, comm_count: int = 0) -> dict:
+    data = _property_to_dict(prop, comm_count)
+    photos = _photos_for_property(prop)
+    summary = _photo_summary_from_photos(photos)
+    data["photos"] = [_photo_to_dict(photo) for photo in photos]
+    data["photo_summary"] = {
+        key: value
+        for key, value in summary.items()
+        if key not in {"primary_before_photo", "primary_after_photo"}
+    }
+    data["primary_before_photo"] = summary["primary_before_photo"]
+    data["primary_after_photo"] = summary["primary_after_photo"]
+    return data
+
+
+def _haversine_meters(
+    lat1: float | None,
+    lon1: float | None,
+    lat2: float | None,
+    lon2: float | None,
+) -> float | None:
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+        return None
+    radius_meters = 6_371_000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    return radius_meters * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _proximity_status(distance_meters: float | None) -> str:
+    if distance_meters is None:
+        return "unlocated"
+    if distance_meters <= 75:
+        return "near_property"
+    if distance_meters <= 250:
+        return "nearby"
+    return "outside_property_area"
+
+
+def _parse_optional_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+@properties_router.get("/search")
+def search_properties(request, q: str = Query(""), limit: int = 8):
+    """Search address, parcel ID, buyer, and organization for global navigation."""
+    query = (q or "").strip()
+    if len(query) < 2:
+        return {"query": query, "results": []}
+
+    qs = (
+        Property.objects.filter(
+            Q(address__icontains=query)
+            | Q(parcel_id__icontains=query)
+            | Q(buyer_name__icontains=query)
+            | Q(organization__icontains=query)
+        )
+        .annotate(communication_count=Count("communications"))
+        .prefetch_related(
+            models.Prefetch(
+                "photos",
+                queryset=PropertyPhoto.objects.order_by("side", "-is_primary", "-uploaded_at"),
+                to_attr="prefetched_photos",
+            )
+        )[: max(limit * 4, limit)]
+    )
+
+    query_lower = query.lower()
+
+    def score(prop: Property) -> tuple[int, str]:
+        fields = {
+            "address": prop.address or "",
+            "parcel": prop.parcel_id or "",
+            "buyer": prop.buyer_name or "",
+            "organization": prop.organization or "",
+        }
+        best = 0
+        for name, value in fields.items():
+            value_lower = value.lower()
+            if value_lower == query_lower:
+                best = max(best, 120)
+            elif value_lower.startswith(query_lower):
+                best = max(best, 95 if name == "address" else 80)
+            elif query_lower in value_lower:
+                best = max(best, 70 if name == "address" else 55)
+        return (-best, prop.address.lower())
+
+    rows = sorted(list(qs), key=score)[:limit]
+    return {
+        "query": query,
+        "results": [_property_with_photo_data(prop, prop.communication_count) for prop in rows],
+    }
+
+
+@properties_router.get("/gallery")
+def gallery_properties(
+    request,
+    status: str = "all",
+    photo: str = "all",
+    sort: str = "address",
+    order: str = "asc",
+    limit: int = 200,
+    offset: int = 0,
+):
+    """Return reviewable property cards for the Before and After gallery."""
+    qs = (
+        Property.objects.all()
+        .annotate(communication_count=Count("communications"))
+        .prefetch_related(
+            models.Prefetch(
+                "photos",
+                queryset=PropertyPhoto.objects.order_by("side", "-is_primary", "-uploaded_at"),
+                to_attr="prefetched_photos",
+            )
+        )
+    )
+
+    rows = [_property_with_photo_data(prop, prop.communication_count) for prop in qs]
+
+    if status != "all":
+        rows = [
+            row for row in rows
+            if (
+                status == "reviewed" and row["manual_compliance_outcome"] != "pending"
+                or status == "pending" and row["manual_compliance_outcome"] == "pending"
+                or row["manual_compliance_outcome"] == status
+            )
+        ]
+
+    if photo != "all":
+        rows = [
+            row for row in rows
+            if (
+                photo == "complete" and row["photo_summary"].get("is_complete")
+                or photo == "missing_before" and not row["photo_summary"].get("has_before")
+                or photo == "missing_after" and not row["photo_summary"].get("has_after")
+                or photo == "has_uploads" and row["photo_summary"].get("total_count", 0) > 0
+            )
+        ]
+
+    reverse = order.lower() == "desc"
+
+    def sort_value(row: dict):
+        if sort == "program":
+            return (row.get("program") or "", row.get("address") or "")
+        if sort == "closing_date":
+            return (row.get("closing_date") or "", row.get("address") or "")
+        if sort == "review_status":
+            return (row.get("manual_compliance_outcome") or "", row.get("address") or "")
+        if sort == "photo_completeness":
+            summary = row.get("photo_summary") or {}
+            return (
+                int(summary.get("is_complete") or False),
+                int(summary.get("total_count") or 0),
+                row.get("address") or "",
+            )
+        if sort == "compliance_outcome":
+            return (row.get("manual_compliance_outcome") or "", row.get("address") or "")
+        return (row.get("address") or "").lower()
+
+    rows.sort(key=sort_value, reverse=reverse)
+    total = len(rows)
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "properties": rows[offset:offset + limit],
+    }
 
 
 @properties_router.get("/")
@@ -204,6 +455,26 @@ def get_map_properties(request, program: str = None, contact: str = "all"):
     rows = list(qs.values())
     prioritized = apply_priority_scores(rows)
     prioritized = filter_by_contact(prioritized, contact)
+    property_ids = [row["id"] for row in prioritized]
+    photo_counts = {}
+    for count_row in (
+        PropertyPhoto.objects.filter(property_id__in=property_ids)
+        .values("property_id", "side")
+        .annotate(n=Count("id"))
+    ):
+        photo_counts.setdefault(count_row["property_id"], {})[count_row["side"]] = count_row["n"]
+
+    for row in prioritized:
+        counts = photo_counts.get(row["id"], {})
+        row["manual_compliance_outcome"] = _manual_outcome_for(row.get("program", ""), row.get("finding", ""))
+        row["photo_summary"] = {
+            "before_count": counts.get("before", 0),
+            "after_count": counts.get("after", 0),
+            "total_count": counts.get("before", 0) + counts.get("after", 0),
+            "has_before": counts.get("before", 0) > 0,
+            "has_after": counts.get("after", 0) > 0,
+            "is_complete": counts.get("before", 0) > 0 and counts.get("after", 0) > 0,
+        }
     prioritized.sort(key=lambda r: (-float(r.get("priority_score", 0.0)), r.get("address", "")))
     return {"count": len(prioritized), "properties": prioritized}
 
@@ -324,6 +595,21 @@ def get_stats(request):
     geocoded = Property.objects.filter(latitude__isnull=False).count()
     imagery_fetched = Property.objects.filter(imagery_fetched_at__isnull=False).count()
     detection_ran = Property.objects.filter(detection_ran_at__isnull=False).count()
+    uploaded_before_count = Property.objects.filter(photos__side="before").distinct().count()
+    uploaded_after_count = Property.objects.filter(photos__side="after").distinct().count()
+    before_exists = PropertyPhoto.objects.filter(property_id=OuterRef("pk"), side="before")
+    after_exists = PropertyPhoto.objects.filter(property_id=OuterRef("pk"), side="after")
+    photo_ready = (
+        Property.objects.annotate(
+            has_before=Exists(before_exists),
+            has_after=Exists(after_exists),
+        )
+        .filter(
+            Q(has_before=True, has_after=True)
+            | Q(streetview_available=True, streetview_historical_path__gt="")
+        )
+        .count()
+    )
 
     by_finding = dict(
         Property.objects.exclude(finding="").exclude(finding__isnull=True)
@@ -344,6 +630,21 @@ def get_stats(request):
     by_compliance_status = dict(
         Property.objects.values_list("compliance_status").annotate(n=Count("id")).order_by()
     )
+    outcome_counts = {
+        "compliant": 0,
+        "non_compliant": 0,
+        "in_progress": 0,
+        "needs_inspection": 0,
+        "pending": 0,
+        "unknown": 0,
+    }
+    reviewed_rows = Property.objects.exclude(finding="").exclude(finding__isnull=True).values(
+        "program",
+        "finding",
+    )
+    for row in reviewed_rows:
+        outcome = _manual_outcome_for(row["program"], row["finding"])
+        outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
 
     return {
         "total": total,
@@ -361,6 +662,13 @@ def get_stats(request):
         "unreviewed_by_detection": unreviewed_by_detection,
         "by_compliance_status": by_compliance_status,
         "percent_reviewed": round(reviewed / total * 100, 1) if total > 0 else 0,
+        "compliant_reviewed": outcome_counts["compliant"],
+        "non_compliant_reviewed": outcome_counts["non_compliant"],
+        "in_progress_reviewed": outcome_counts["in_progress"],
+        "compliant_percent_reviewed": round(outcome_counts["compliant"] / reviewed * 100, 1) if reviewed > 0 else 0,
+        "photo_ready": photo_ready,
+        "uploaded_before_count": uploaded_before_count,
+        "uploaded_after_count": uploaded_after_count,
     }
 
 
@@ -586,6 +894,114 @@ def export_summary(request):
     return HttpResponse(report, content_type="text/plain")
 
 
+@properties_router.get("/{property_id}/photos")
+def list_property_photos(request, property_id: int):
+    """List uploaded before and after photos for one property."""
+    if not Property.objects.filter(pk=property_id).exists():
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    photos = PropertyPhoto.objects.filter(property_id=property_id)
+    return {
+        "property_id": property_id,
+        "photos": [_photo_to_dict(photo) for photo in photos],
+        "photo_summary": _photo_summary_from_photos(list(photos)),
+    }
+
+
+@properties_router.post("/{property_id}/photos")
+def upload_property_photo(
+    request,
+    property_id: int,
+    image: UploadedFile = File(...),
+    side: str = Form(...),
+    caption: str = Form(""),
+    photo_date: str = Form(""),
+    is_primary: bool = Form(True),
+    photo_latitude: Optional[float] = Form(None),
+    photo_longitude: Optional[float] = Form(None),
+):
+    """Upload one before or after photo and keep one primary image per side."""
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    if side not in {"before", "after"}:
+        return api.create_response(request, {"detail": "side must be before or after"}, status=400)
+
+    if image.content_type and not image.content_type.startswith("image/"):
+        return api.create_response(request, {"detail": "Upload must be an image"}, status=400)
+
+    has_primary = PropertyPhoto.objects.filter(
+        property_id=property_id,
+        side=side,
+        is_primary=True,
+    ).exists()
+    make_primary = is_primary or not has_primary
+    distance = _haversine_meters(
+        prop.latitude,
+        prop.longitude,
+        photo_latitude,
+        photo_longitude,
+    )
+
+    with transaction.atomic():
+        if make_primary:
+            PropertyPhoto.objects.filter(property_id=property_id, side=side).update(is_primary=False)
+        photo = PropertyPhoto.objects.create(
+            property=prop,
+            side=side,
+            image=image,
+            original_filename=image.name or "",
+            caption=caption,
+            is_primary=make_primary,
+            photo_date=_parse_optional_date(photo_date),
+            photo_latitude=photo_latitude,
+            photo_longitude=photo_longitude,
+            distance_from_property_meters=distance,
+            proximity_status=_proximity_status(distance),
+            metadata={
+                "content_type": image.content_type or "",
+                "size": getattr(image, "size", None),
+            },
+        )
+
+    return _photo_to_dict(photo)
+
+
+@properties_router.patch("/{property_id}/photos/{photo_id}")
+def update_property_photo(
+    request,
+    property_id: int,
+    photo_id: int,
+    is_primary: Optional[bool] = None,
+    caption: Optional[str] = None,
+):
+    """Update photo metadata or mark a photo as primary."""
+    try:
+        photo = PropertyPhoto.objects.select_related("property").get(
+            pk=photo_id,
+            property_id=property_id,
+        )
+    except PropertyPhoto.DoesNotExist:
+        return api.create_response(request, {"detail": "Photo not found"}, status=404)
+
+    with transaction.atomic():
+        if caption is not None:
+            photo.caption = caption
+        if is_primary is True:
+            PropertyPhoto.objects.filter(
+                property_id=property_id,
+                side=photo.side,
+            ).exclude(pk=photo.pk).update(is_primary=False)
+            photo.is_primary = True
+        elif is_primary is False:
+            photo.is_primary = False
+        photo.save()
+
+    return _photo_to_dict(photo)
+
+
 # Path-parameter routes must come after all static /properties/* routes
 # so Django Ninja doesn't match "import", "export", etc. as {property_id}.
 
@@ -598,7 +1014,7 @@ def get_property(request, property_id: int):
         ).get(pk=property_id)
     except Property.DoesNotExist:
         return api.create_response(request, {"detail": "Property not found"}, status=404)
-    return _property_to_dict(prop, prop.communication_count)
+    return _property_with_photo_data(prop, prop.communication_count)
 
 
 @properties_router.patch("/{property_id}")
@@ -623,7 +1039,7 @@ def update_property(request, property_id: int, payload: PropertyUpdate):
 
     prop.save()
     comm_count = prop.communications.count()
-    return _property_to_dict(prop, comm_count)
+    return _property_with_photo_data(prop, comm_count)
 
 
 @properties_router.delete("/{property_id}")

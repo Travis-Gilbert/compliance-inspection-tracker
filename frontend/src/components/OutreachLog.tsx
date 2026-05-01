@@ -94,8 +94,10 @@ export default function OutreachLog({ propertyId }: OutreachLogProps) {
         <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Method</label>
+              <label htmlFor="outreach-method" className="block text-xs font-medium text-gray-600 mb-1">Method</label>
               <select
+                id="outreach-method"
+                name="outreach-method"
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}
                 className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs"
@@ -106,8 +108,11 @@ export default function OutreachLog({ propertyId }: OutreachLogProps) {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+              <label htmlFor="outreach-subject" className="block text-xs font-medium text-gray-600 mb-1">Subject</label>
               <input
+                id="outreach-subject"
+                name="outreach-subject"
+                autoComplete="off"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 placeholder="Compliance follow-up"
@@ -116,12 +121,14 @@ export default function OutreachLog({ propertyId }: OutreachLogProps) {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <label htmlFor="outreach-notes" className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
             <textarea
+              id="outreach-notes"
+              name="outreach-notes"
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={3}
-              placeholder="Details about this outreach attempt..."
+              placeholder="Details about this outreach attempt…"
               className="w-full rounded border border-gray-200 px-2 py-1.5 text-xs"
             />
           </div>
@@ -130,13 +137,13 @@ export default function OutreachLog({ propertyId }: OutreachLogProps) {
             disabled={saving}
             className="rounded bg-civic-green px-4 py-1.5 text-xs font-medium text-white hover:bg-civic-green-light disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving…" : "Save"}
           </button>
         </div>
       )}
 
       {loading ? (
-        <div className="text-xs text-gray-400">Loading communications...</div>
+        <div className="text-xs text-gray-400">Loading communications…</div>
       ) : comms.length === 0 ? (
         <div className="text-xs text-gray-400">No outreach recorded yet.</div>
       ) : (

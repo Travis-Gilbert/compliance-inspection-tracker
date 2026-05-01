@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { getImageUrl } from "@/lib/api";
 import { DETECTION_LABELS } from "@/lib/constants";
 import type { Property } from "@/lib/types";
 import ComplianceStatusBadge from "@/components/ComplianceStatusBadge";
 import TaxInfoCard from "@/components/TaxInfoCard";
 import OutreachLog from "@/components/OutreachLog";
+import { PhotoEvidencePair } from "@/components/evidence/PhotoEvidence";
 import FindingButtons from "./FindingButtons";
 
 interface PropertyDetailPanelProps {
@@ -17,6 +16,7 @@ interface PropertyDetailPanelProps {
   onFindingAssign: (finding: string) => void;
   saving: boolean;
   notice?: { tone: "info" | "success" | "warning" | "error"; title: string; message: string } | null;
+  onPhotosChanged?: () => void;
 }
 
 export default function PropertyDetailPanel({
@@ -26,13 +26,12 @@ export default function PropertyDetailPanel({
   onSaveNotes,
   onFindingAssign,
   saving,
+  onPhotosChanged,
 }: PropertyDetailPanelProps) {
   const detection = DETECTION_LABELS[property.detection_label || ""];
   const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(property.formatted_address || `${property.address}, Flint, MI`)}`;
   const propertyPortalUrl = `https://www.flintpropertyportal.com/search?q=${encodeURIComponent(property.address)}`;
   const googleMapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(property.formatted_address || `${property.address}, Flint, MI`)}`;
-
-  const [streetviewError, setStreetviewError] = useState(false);
 
   return (
     <section aria-label="Property detail" className="space-y-4 p-4">
@@ -59,56 +58,7 @@ export default function PropertyDetailPanel({
         </div>
       </div>
 
-      {/* Imagery side-by-side */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="overflow-hidden rounded border border-gray-200 bg-gray-100">
-          <div className="flex items-center justify-between border-b border-gray-100 bg-white px-2 py-1">
-            <span className="text-[11px] font-medium text-gray-700">Street View</span>
-            {property.streetview_date && (
-              <span className="text-[11px] text-gray-400">{property.streetview_date}</span>
-            )}
-          </div>
-          {property.streetview_available && !streetviewError ? (
-            <img
-              src={getImageUrl(property.id, "streetview")}
-              alt={`Street View for ${property.address}`}
-              className="aspect-video w-full object-cover"
-              onError={() => setStreetviewError(true)}
-            />
-          ) : (
-            <div className="flex aspect-video w-full items-center justify-center text-xs text-gray-400 px-2 text-center">
-              {streetviewError ? (
-                <a
-                  href={streetViewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-civic-green hover:underline"
-                >
-                  View on Google Street View
-                </a>
-              ) : (
-                "No Street View"
-              )}
-            </div>
-          )}
-        </div>
-        <div className="overflow-hidden rounded border border-gray-200 bg-gray-100">
-          <div className="border-b border-gray-100 bg-white px-2 py-1">
-            <span className="text-[11px] font-medium text-gray-700">Satellite</span>
-          </div>
-          {property.satellite_path ? (
-            <img
-              src={getImageUrl(property.id, "satellite")}
-              alt={`Satellite for ${property.address}`}
-              className="aspect-video w-full object-cover"
-            />
-          ) : (
-            <div className="flex aspect-video w-full items-center justify-center text-xs text-gray-400">
-              No satellite image
-            </div>
-          )}
-        </div>
-      </div>
+      <PhotoEvidencePair property={property} onUploaded={onPhotosChanged} />
 
       {/* Detection alert */}
       {detection && property.detection_label !== "unprocessed" && (
@@ -180,8 +130,10 @@ export default function PropertyDetailPanel({
 
       {/* Notes */}
       <div>
-        <div className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Notes</div>
+        <label htmlFor={`property-notes-${property.id}`} className="mb-1 block text-xs font-medium uppercase tracking-wide text-gray-500">Notes</label>
         <textarea
+          id={`property-notes-${property.id}`}
+          name={`property-notes-${property.id}`}
           value={notes}
           onChange={(e) => onNotesChange(e.target.value)}
           placeholder="Street View shows recent renovation work. New siding visible."
@@ -197,7 +149,7 @@ export default function PropertyDetailPanel({
               : "bg-civic-green text-white hover:bg-civic-green-light"
           }`}
         >
-          {saving ? "Saving..." : "Save Notes"}
+          {saving ? "Saving…" : "Save Notes"}
         </button>
       </div>
 

@@ -24,7 +24,7 @@ export function DashboardSkeleton() {
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="bg-white rounded-lg border border-gray-200 border-l-4 border-l-gray-200 p-4">
+          <div key={i} className="bg-white rounded-lg border border-gray-200 p-4">
             <Bone className="h-3 w-20 mb-2" />
             <Bone className="h-7 w-12" />
           </div>

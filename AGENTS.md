@@ -13,7 +13,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 - **Backend:** Django Ninja on Railway (`backend-django/`) with the original FastAPI app retained in `backend/`
 - **Frontend:** Next.js 15 App Router + React 19 + TypeScript + Tailwind CSS
-- **Database:** SQLite (single local file at `backend/data/compliance_tracker.db`)
+- **Database:** Postgres with PostGIS. `DATABASE_URL` must point at a PostGIS-enabled database for local and deployed Django work.
 - **External APIs:** Google Maps Platform (Street View Static, Maps Static, Geocoding)
 - **Image Analysis:** NumPy + Pillow for heuristic vacancy/demolition detection
 
@@ -21,11 +21,12 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ### Backend
 ```bash
-cd backend
+cd backend-django
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env              # Then add GOOGLE_MAPS_API_KEY
-uvicorn app.main:app --reload     # http://localhost:8000
+cp .env.example .env              # Then set DATABASE_URL and GOOGLE_MAPS_API_KEY
+python manage.py migrate
+uvicorn config.asgi:application --reload --port 8001
 ```
 
 ### Frontend
@@ -37,28 +38,28 @@ npm run build                     # Production build via Next.js
 ```
 
 ### Both (typical dev session)
-Start `backend-django` first (port 8001), then frontend (port 3000). The Next.js app uses same-origin requests locally and `next.config.ts` rewrites `/api` and `/images` to the Django backend.
+Start `backend-django` first (port 8001), then frontend (port 3000). The Next.js app uses same-origin requests locally and `next.config.ts` rewrites `/api` and `/images` to the Django backend. Local backend work expects a Postgres database with the PostGIS extension enabled.
 
 ### API docs
-FastAPI auto-generates Swagger UI at http://localhost:8000/docs when the backend is running.
+Django Ninja serves API docs at http://localhost:8001/api/docs when the backend is running.
 
 ### Useful Commands
 ```bash
 # Stop orphaned backend server
-lsof -ti:8000 | xargs kill
+lsof -ti:8001 | xargs kill
 
 # Test pipeline via curl (after importing properties)
-curl -s -X POST "http://127.0.0.1:8000/api/pipeline/process?limit=25" | python3 -m json.tool
+curl -s -X POST "http://127.0.0.1:8001/api/pipeline/process?limit=25" | python3 -m json.tool
 
 # Test single geocode
-curl -s -X POST "http://127.0.0.1:8000/api/imagery/geocode/{property_id}" | python3 -m json.tool
+curl -s -X POST "http://127.0.0.1:8001/api/imagery/geocode-batch?limit=1" | python3 -m json.tool
 ```
 
 ### Testing without Google API key
 The tool functions for import, manual review, and export without a Google Maps API key. Geocoding, imagery fetching, and detection will return empty results but won't crash.
 
 ### Google Maps API gotcha
-The API key must have three APIs enabled individually in Google Cloud Console: Geocoding API, Street View Static API, Maps Static API. If any are missing, the pipeline silently returns 0 processed (no error surfaced). Config loads via `load_dotenv()` at import time, so the server must be restarted after `.env` changes.
+The API key must have three APIs enabled individually in Google Cloud Console: Geocoding API, Street View Static API, Maps Static API. If any are missing, the pipeline silently returns 0 processed (no error surfaced). Django reads `.env` at settings import time, so the server must be restarted after `.env` changes.
 
 ## Architecture
 
@@ -67,43 +68,32 @@ The API key must have three APIs enabled individually in Google Cloud Console: G
 Browser (Next.js, :3000 locally or Vercel in production)
   → same-origin `/api/*` and `/images/*` locally
   → Django backend (`backend-django/`, :8001 locally or Railway in production)
-    → SQLite / cached imagery
+    → Postgres/PostGIS / Django media storage
     → Google Maps APIs (geocoding, imagery)
 ```
 
 ### Backend layer structure
 
-**`app/main.py`**: FastAPI app with lifespan (DB init), CORS config, router registration, and the pipeline endpoints (`/api/pipeline/process` and `/api/pipeline/process-stream`). The pipeline is defined here (not in a router) because it orchestrates across multiple services.
+**`backend-django/tracker/api.py`**: Django Ninja API entry point. Registers property, imagery, detection, communication, and pipeline routers under `/api`.
 
-**`app/api/`** (route handlers):
-- `properties.py` - All property CRUD, CSV import, stats, export. Prefix: `/api/properties`
-- `imagery.py` - Geocoding and image fetching routes. Prefix: `/api/imagery`
-- `detection.py` - Detection analysis routes. Prefix: `/api/detection`
-- `comms.py` - Communication tracking (Phase 2 scaffolding). Prefix: `/api/communications`
+**`backend-django/tracker/models.py`**: Django ORM source of truth for `Property`, `PropertyPhoto`, `Communication`, and `ImportBatch`.
 
-**`app/services/`** (business logic, no HTTP concerns):
+**`backend-django/tracker/schemas.py`**: Ninja/Pydantic request and response schemas.
+
+**`backend-django/tracker/services/`** (business logic, no HTTP concerns):
 - `csv_parser.py` - Two-pass column auto-detection (exact match first, substring second)
 - `geocoder.py` - Google Geocoding with Genesee County bounds bias
 - `imagery.py` - Street View + satellite fetching with disk caching (MD5 filenames)
 - `detector.py` - Heuristic image analysis (5 weighted signals, composite 0.0-1.0 score)
 - `exporter.py` - CSV and text report generation
 
-**`app/models/`** (data layer):
-- `database.py` - SQLite connection via `get_db()` dependency, schema init
-- `property.py` - Pydantic models (`PropertyCreate`, `PropertyUpdate`, `PropertyResponse`, `StatsResponse`), enums (`FindingType`, `DetectionLabel`, `Program`)
-- `communication.py` - Phase 2 communication models
-
-**`app/config.py`** - All settings from `.env`. Key values: `GOOGLE_MAPS_API_KEY`, `DATABASE_PATH`, `IMAGE_CACHE_DIR`, `VACANCY_THRESHOLD` (0.6), `DEMOLITION_THRESHOLD` (0.7).
+**`backend-django/config/settings.py`** - All settings from `.env`. Key values: `DATABASE_URL`, `GOOGLE_MAPS_API_KEY`, `IMAGE_CACHE_DIR`, `VACANCY_THRESHOLD` (0.6), `DEMOLITION_THRESHOLD` (0.7).
 
 ### Database pattern
 
-All async via aiosqlite. Route handlers get a connection via FastAPI dependency injection:
-```python
-async def some_route(db: aiosqlite.Connection = Depends(get_db)):
-```
-The pipeline endpoint in `main.py` opens its own connection directly (it runs long operations across multiple services).
+Django ORM models are the source of truth. Postgres stores record state and uploaded photo metadata. PostGIS generated point columns support property and photo geography for map layers and proximity validation. Django media storage stores image bytes.
 
-Three tables: `properties` (main data, 25+ columns tracking the full lifecycle), `communications` (Phase 2), `import_batches` (tracking CSV imports).
+Core tables: `properties` (main data, 25+ columns tracking the full lifecycle), `property_photos` (uploaded before and after evidence with optional geography), `communications` (Phase 2), `import_batches` (tracking CSV imports).
 
 ### Frontend routing
 
@@ -111,6 +101,7 @@ Three tables: `properties` (main data, 25+ columns tracking the full lifecycle),
 |------|-----------|---------|
 | `/` | `src/app/(main)/page.tsx` | Dashboard, photo coverage, progress |
 | `/review` | `src/app/(main)/review/page.tsx` | Main work surface, property list sorted worst-first |
+| `/before-after` | `src/app/(main)/before-after/page.tsx` | Reviewable before and after gallery with uploads |
 | `/property/:id` | `src/app/(main)/property/[id]/page.tsx` | Single property deep-dive with imagery |
 | `/import` | `src/app/(main)/import/page.tsx` | CSV file upload or text paste |
 | `/export` | `src/app/(main)/export/page.tsx` | Download options (full CSV, inspection list, summary) |
@@ -121,7 +112,7 @@ Three tables: `properties` (main data, 25+ columns tracking the full lifecycle),
 
 All backend calls go through `frontend/src/lib/api.ts`. In local development the frontend uses same-origin paths and Next rewrites; in production it defaults directly to the Railway backend so image and API traffic do not depend on Vercel proxy routing.
 
-CSV import uses `FormData` (multipart), not JSON, because FastAPI requires `Form()` params when `UploadFile` is present.
+CSV import and photo upload use `FormData` (multipart), not JSON, because file uploads require multipart form bodies.
 
 ### Pipeline (the core feature)
 
@@ -201,11 +192,17 @@ Colors are defined in `frontend/tailwind.config.ts` and `frontend/src/lib/consta
 
 Aesthetic: civic utilitarian. High data density, no decoration. Think government desk tool, not SaaS dashboard.
 
+## Recent Decisions
+
+| Date | Decision | Reason |
+|------|----------|--------|
+| 2026-05-01 | Postgres/PostGIS is the database foundation for local and deployed Django work. | Before and after photo geography, heat layers, and proximity validation need native spatial support. SQLite is no longer the project default. |
+
 ## Current Status
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Backend (FastAPI + SQLite) | Done | All CRUD, import, export, stats, pipeline endpoints |
+| Backend (Django Ninja + Postgres/PostGIS) | In progress | CRUD, import, export, stats, pipeline endpoints are present. Photo geography and gallery endpoints are being added. |
 | Frontend (Next.js App Router) | Done | Dashboard, review queue, property detail, import, export, processing, and map routes |
 | CSV parser (smart column detection) | Done | Two-pass matching, BOM handling, \x0b stripping for FileMaker |
 | Pipeline (geocode, imagery, detection) | Done | Tested end-to-end with 9 Flint properties; all three stages working |

@@ -63,6 +63,17 @@ export default function PropertyDetailPage() {
     return () => { cancelled = true; };
   }, [id]);
 
+  const reloadProperty = useCallback(async () => {
+    try {
+      const result: Property = await getProperty(id);
+      setProperty(result);
+      setNotes(result.notes || "");
+      setLoadError("");
+    } catch (error: unknown) {
+      setLoadError((error as Error).message || "The property could not be loaded.");
+    }
+  }, [id]);
+
   const handleFinding = useCallback(
     async (finding: string) => {
       if (!property) return;
@@ -200,6 +211,7 @@ export default function PropertyDetailPage() {
         onFindingAssign={handleFinding}
         saving={saving}
         notice={notice}
+        onPhotosChanged={reloadProperty}
       />
     </div>
   );

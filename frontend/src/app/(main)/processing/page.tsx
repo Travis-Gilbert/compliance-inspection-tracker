@@ -253,7 +253,7 @@ export default function ProcessingPage() {
                 : "bg-civic-green text-white hover:bg-civic-green-light"
             }`}
           >
-            {processing && processingMode === "batch" ? "Processing..." : "Run Next Batch"}
+            {processing && processingMode === "batch" ? "Processing…" : "Run Next Batch"}
           </button>
 
           <button
@@ -265,7 +265,7 @@ export default function ProcessingPage() {
                 : "bg-civic-blue text-white hover:bg-civic-blue-light"
             }`}
           >
-            {processing && processingMode === "all" ? "Processing..." : "Process All Remaining"}
+            {processing && processingMode === "all" ? "Processing…" : "Process All Remaining"}
           </button>
 
           {processing && (

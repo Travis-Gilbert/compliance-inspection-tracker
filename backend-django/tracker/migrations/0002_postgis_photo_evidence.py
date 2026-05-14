@@ -46,6 +46,28 @@ ALTER TABLE tracker_property DROP COLUMN IF EXISTS geo_point;
 """
 
 
+def apply_postgis_sql(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'postgis')"
+        )
+        postgis_available = cursor.fetchone()[0]
+        if not postgis_available:
+            return
+        cursor.execute(POSTGIS_SQL)
+
+
+def reverse_postgis_sql(apps, schema_editor):
+    if schema_editor.connection.vendor != "postgresql":
+        return
+
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(POSTGIS_REVERSE_SQL)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -114,5 +136,5 @@ class Migration(migrations.Migration):
                 ],
             },
         ),
-        migrations.RunSQL(POSTGIS_SQL, POSTGIS_REVERSE_SQL),
+        migrations.RunPython(apply_postgis_sql, reverse_postgis_sql),
     ]

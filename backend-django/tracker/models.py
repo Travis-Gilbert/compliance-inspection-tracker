@@ -10,6 +10,74 @@ def property_photo_upload_to(instance, filename):
     return f"property_photos/{instance.property_id}/{side}/{filename}"
 
 
+class Buyer(models.Model):
+    """Normalized buyer record linked gradually from imported property rollups."""
+
+    full_name = models.CharField(max_length=255, default="", db_index=True)
+    email = models.EmailField(default="", blank=True, db_index=True)
+    phone = models.CharField(max_length=50, default="", blank=True)
+    organization = models.CharField(max_length=255, default="", blank=True, db_index=True)
+    status = models.CharField(max_length=30, default="unknown", db_index=True)
+    flags = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["full_name", "organization", "id"]
+        indexes = [
+            models.Index(fields=["full_name", "organization"]),
+        ]
+
+    def __str__(self):
+        return self.full_name or self.organization or f"Buyer {self.pk}"
+
+
+class Program(models.Model):
+    """Program rules for compliance timing and required evidence."""
+
+    key = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=100)
+    cadence = models.CharField(max_length=50, default="", blank=True)
+    schedule = models.JSONField(default=list, blank=True)
+    grace_days = models.PositiveIntegerField(default=0)
+    required_uploads = models.JSONField(default=list, blank=True)
+    required_docs = models.JSONField(default=list, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["label"]
+
+    def __str__(self):
+        return self.label
+
+
+class EmailTemplate(models.Model):
+    """Draft or active template variants keyed by workflow action."""
+
+    STATUS_CHOICES = [
+        ("draft", "Draft"),
+        ("active", "Active"),
+        ("retired", "Retired"),
+    ]
+
+    slug = models.SlugField(max_length=100, unique=True)
+    name = models.CharField(max_length=255)
+    program_keys = models.JSONField(default=list, blank=True)
+    variants = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft", db_index=True)
+    is_active = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class Property(models.Model):
     """
     Core model replacing the raw SQL `properties` table.
@@ -24,11 +92,25 @@ class Property(models.Model):
     parcel_id = models.CharField(max_length=20, default="", db_index=True)
 
     # Buyer info
+    buyer = models.ForeignKey(
+        Buyer,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="properties",
+    )
     buyer_name = models.CharField(max_length=255, default="")
     email = models.EmailField(default="", blank=True)
     organization = models.CharField(max_length=255, default="", blank=True)
 
     # Sale details
+    program_record = models.ForeignKey(
+        Program,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="properties",
+    )
     program = models.CharField(max_length=50, default="", db_index=True)
     closing_date = models.CharField(max_length=20, default="")
     commitment = models.TextField(default="")
@@ -238,6 +320,20 @@ class Communication(models.Model):
         on_delete=models.CASCADE,
         related_name="communications",
     )
+    buyer = models.ForeignKey(
+        Buyer,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="communications",
+    )
+    template = models.ForeignKey(
+        EmailTemplate,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="communications",
+    )
     METHOD_CHOICES = [
         ("email", "Email"),
         ("phone", "Phone"),
@@ -247,9 +343,25 @@ class Communication(models.Model):
     ]
     method = models.CharField(max_length=20, choices=METHOD_CHOICES)
     direction = models.CharField(max_length=20, default="outbound")
+    action = models.CharField(max_length=40, default="", blank=True, db_index=True)
+    template_name = models.CharField(max_length=255, default="", blank=True)
+    STATUS_CHOICES = [
+        ("logged", "Logged"),
+        ("draft", "Draft"),
+        ("sent", "Sent"),
+        ("delivered", "Delivered"),
+        ("bounced", "Bounced"),
+        ("failed", "Failed"),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="logged", db_index=True)
+    recipient_email = models.EmailField(default="", blank=True)
     date_sent = models.DateField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    provider_message_id = models.CharField(max_length=255, default="", blank=True)
     subject = models.CharField(max_length=255, default="")
     body = models.TextField(default="")
+    body_hash = models.CharField(max_length=64, default="", blank=True)
     response_received = models.BooleanField(default=False)
     response_date = models.DateField(null=True, blank=True)
     response_notes = models.TextField(default="")
@@ -260,6 +372,166 @@ class Communication(models.Model):
 
     def __str__(self):
         return f"{self.method} to {self.property.address} ({self.date_sent})"
+
+
+class ActionItem(models.Model):
+    """Workflow queue item generated by timing rules or staff review."""
+
+    STATUS_CHOICES = [
+        ("open", "Open"),
+        ("in_progress", "In Progress"),
+        ("completed", "Completed"),
+        ("dismissed", "Dismissed"),
+    ]
+    ACTION_CHOICES = [
+        ("NOT_DUE_YET", "Not Due Yet"),
+        ("ATTEMPT_1", "First Attempt"),
+        ("ATTEMPT_2", "Second Attempt"),
+        ("WARNING", "Warning"),
+        ("DEFAULT_NOTICE", "Default Notice"),
+        ("TAX_VERIFICATION", "Tax Verification"),
+        ("MISSING_EMAIL", "Missing Email"),
+        ("NEEDS_INSPECTION", "Needs Inspection"),
+        ("MANUAL_REVIEW", "Manual Review"),
+    ]
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="action_items",
+    )
+    buyer = models.ForeignKey(
+        Buyer,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="action_items",
+    )
+    program = models.ForeignKey(
+        Program,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="action_items",
+    )
+    action = models.CharField(max_length=40, choices=ACTION_CHOICES, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open", db_index=True)
+    due_date = models.DateField(null=True, blank=True, db_index=True)
+    days_overdue = models.IntegerField(default=0)
+    enforcement_level = models.PositiveSmallIntegerField(default=0)
+    priority = models.IntegerField(default=0, db_index=True)
+    reasons = models.JSONField(default=list, blank=True)
+    source = models.CharField(max_length=50, default="system", blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["status", "-priority", "due_date", "id"]
+        indexes = [
+            models.Index(fields=["status", "action", "due_date"]),
+            models.Index(fields=["property", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.action} for {self.property.address}"
+
+
+class TaxSnapshot(models.Model):
+    """Historical tax status check for a property."""
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="tax_snapshots",
+    )
+    status = models.CharField(max_length=20, choices=Property.TAX_STATUS_CHOICES, default="unknown")
+    checked_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    source = models.CharField(max_length=50, default="manual", blank=True)
+    tax_year = models.CharField(max_length=20, default="", blank=True)
+    amount_owed = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    last_payment_date = models.DateField(null=True, blank=True)
+    raw_data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-checked_at"]
+        indexes = [
+            models.Index(fields=["property", "-checked_at"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self):
+        checked = self.checked_at.date() if self.checked_at else "unsaved"
+        return f"{self.property.parcel_id}: {self.status} ({checked})"
+
+
+class Document(models.Model):
+    """S3-ready document or photo metadata."""
+
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="documents",
+    )
+    communication = models.ForeignKey(
+        Communication,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="documents",
+    )
+    filename = models.CharField(max_length=255)
+    storage_key = models.CharField(max_length=500, default="", blank=True)
+    storage_url = models.URLField(default="", blank=True)
+    mime_type = models.CharField(max_length=120, default="", blank=True)
+    size_bytes = models.PositiveIntegerField(default=0)
+    category = models.CharField(max_length=50, default="document", db_index=True)
+    slot = models.CharField(max_length=100, default="", blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["property", "category"]),
+        ]
+
+    def __str__(self):
+        return self.filename
+
+
+class Note(models.Model):
+    """Append-only internal activity note."""
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="activity_notes",
+    )
+    buyer = models.ForeignKey(
+        Buyer,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="activity_notes",
+    )
+    author = models.CharField(max_length=100, default="staff", blank=True)
+    category = models.CharField(max_length=50, default="general", db_index=True)
+    body = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["property", "-created_at"]),
+        ]
+
+    def __str__(self):
+        created = self.created_at.date() if self.created_at else "unsaved"
+        return f"Note for {self.property.address} ({created})"
 
 
 class ImportBatch(models.Model):

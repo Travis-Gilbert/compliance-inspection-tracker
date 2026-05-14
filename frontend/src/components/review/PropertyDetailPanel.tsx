@@ -17,6 +17,7 @@ interface PropertyDetailPanelProps {
   saving: boolean;
   notice?: { tone: "info" | "success" | "warning" | "error"; title: string; message: string } | null;
   onPhotosChanged?: () => void;
+  onWorkflowChanged?: () => void;
 }
 
 export default function PropertyDetailPanel({
@@ -27,6 +28,7 @@ export default function PropertyDetailPanel({
   onFindingAssign,
   saving,
   onPhotosChanged,
+  onWorkflowChanged,
 }: PropertyDetailPanelProps) {
   const detection = DETECTION_LABELS[property.detection_label || ""];
   const streetViewUrl = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${encodeURIComponent(property.formatted_address || `${property.address}, Flint, MI`)}`;
@@ -162,7 +164,7 @@ export default function PropertyDetailPanel({
       />
 
       {/* Outreach Log */}
-      <OutreachLog propertyId={property.id} />
+      <OutreachLog propertyId={property.id} onWorkflowChanged={onWorkflowChanged} />
 
       {/* Metadata */}
       <div className="flex flex-wrap gap-3 text-[11px] text-gray-400">

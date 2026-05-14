@@ -12,6 +12,7 @@ ACTION_ATTEMPT_2 = "ATTEMPT_2"
 ACTION_WARNING = "WARNING"
 ACTION_DEFAULT_NOTICE = "DEFAULT_NOTICE"
 ACTION_NOT_DUE_YET = "NOT_DUE_YET"
+ACTION_MANUAL_REVIEW = "MANUAL_REVIEW"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,22 @@ class ComplianceTimingError:
             "propertyId": self.property_id,
             "parcelId": self.parcel_id,
             "address": self.address,
+            "buyerName": "",
+            "buyerEmail": "",
+            "programType": "",
+            "programLabel": "",
+            "daysSinceClose": 0,
+            "currentAction": ACTION_MANUAL_REVIEW,
+            "recommendedEnforcementLevel": 0,
+            "dueDate": "",
+            "isDueNow": False,
+            "daysOverdue": 0,
+            "actionAlreadySent": False,
+            "completedActions": [],
+            "nextAction": None,
+            "nextDueDate": None,
+            "lastContactDate": None,
+            "reasons": [self.error],
         }
 
 

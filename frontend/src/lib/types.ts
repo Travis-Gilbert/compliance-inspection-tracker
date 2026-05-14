@@ -126,3 +126,132 @@ export interface SearchResponse {
   query: string;
   results: Property[];
 }
+
+export interface WorkflowTiming {
+  propertyId: number | null;
+  parcelId: string;
+  address: string;
+  buyerName: string;
+  buyerEmail: string;
+  programType: string;
+  programLabel: string;
+  daysSinceClose: number;
+  currentAction: string;
+  recommendedEnforcementLevel: number;
+  dueDate: string;
+  isDueNow: boolean;
+  daysOverdue: number;
+  actionAlreadySent: boolean;
+  completedActions: string[];
+  nextAction: string | null;
+  nextDueDate: string | null;
+  lastContactDate: string | null;
+  reasons: string[];
+  error?: string;
+}
+
+export interface WorkflowQueueItem {
+  propertyId: number;
+  parcelId: string;
+  address: string;
+  buyerName: string;
+  buyerEmail: string;
+  program: string;
+  action: string;
+  actionLabel: string;
+  status: string;
+  dueDate: string | null;
+  daysOverdue: number;
+  priority: number;
+  enforcementLevel: number;
+  reasons: string[];
+  source: string;
+  finding: string | null;
+  manualOutcome: ComplianceOutcome | string;
+  taxStatus: string | null;
+  notes: string;
+  timing?: WorkflowTiming;
+}
+
+export interface WorkflowQueueGroup {
+  action: string;
+  label: string;
+  count: number;
+  items: WorkflowQueueItem[];
+}
+
+export interface WorkflowQueueResponse {
+  asOf: string;
+  groupOrder: string[];
+  groups: WorkflowQueueGroup[];
+  summary: Record<string, number>;
+  totalItems: number;
+}
+
+export interface WorkflowTemplateRef {
+  slug: string;
+  name: string;
+  status: string;
+  isActive: boolean;
+}
+
+export interface WorkflowTemplatePreview {
+  propertyId: number;
+  action: string;
+  template: WorkflowTemplateRef;
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  missingVariables: string[];
+  variables: Record<string, string>;
+  timing: WorkflowTiming;
+}
+
+export interface WorkflowCommunication {
+  id: number;
+  property_id: number;
+  buyer_id: number | null;
+  template_id: number | null;
+  template_slug: string;
+  template_name: string;
+  method: string;
+  direction: string;
+  action: string;
+  status: string;
+  recipient_email: string;
+  provider_message_id: string;
+  date_sent: string | null;
+  sent_at: string | null;
+  approved_at: string | null;
+  subject: string;
+  body: string;
+  body_hash: string;
+  response_received: boolean;
+  response_date: string | null;
+  response_notes: string;
+  created_at: string | null;
+  preview?: WorkflowTemplatePreview;
+  documents?: WorkflowDocument[];
+}
+
+export interface WorkflowDocument {
+  id: number;
+  property_id: number | null;
+  communication_id: number | null;
+  filename: string;
+  storage_key: string;
+  storage_url: string;
+  mime_type: string;
+  size_bytes: number;
+  category: string;
+  slot: string;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface WorkflowLetterPacketResponse {
+  batch_document: WorkflowDocument;
+  manifest_document: WorkflowDocument;
+  letters: WorkflowDocument[];
+  audits: WorkflowDocument[];
+}

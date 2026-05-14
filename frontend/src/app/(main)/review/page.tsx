@@ -325,6 +325,7 @@ function ReviewQueueInner() {
             saving={saving}
             notice={notice}
             onPhotosChanged={reloadSelectedProperty}
+            onWorkflowChanged={reloadSelectedProperty}
           />
         ) : (
           <div className="flex h-full items-center justify-center px-8 text-center">

@@ -240,3 +240,24 @@ class CommunicationResponse(Schema):
 
     class Config:
         from_attributes = True
+
+
+class WorkflowCommunicationCreate(Schema):
+    method: str
+    direction: str = "outbound"
+    action: str = ""
+    status: str = "draft"
+    template_slug: Optional[str] = None
+    recipient_email: str = ""
+    date_sent: Optional[date] = None
+    sent_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+    provider_message_id: str = ""
+    subject: str = ""
+    body: str = ""
+
+
+class WorkflowLetterPacketCreate(Schema):
+    property_ids: list[int]
+    action: Optional[str] = None
+    template_slug: Optional[str] = None

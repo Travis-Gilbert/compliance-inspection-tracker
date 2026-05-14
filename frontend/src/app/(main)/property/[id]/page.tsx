@@ -212,6 +212,7 @@ export default function PropertyDetailPage() {
         saving={saving}
         notice={notice}
         onPhotosChanged={reloadProperty}
+        onWorkflowChanged={reloadProperty}
       />
     </div>
   );

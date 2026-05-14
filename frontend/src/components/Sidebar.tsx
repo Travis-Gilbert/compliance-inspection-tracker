@@ -21,6 +21,18 @@ const NAV_GROUPS = [
         ),
       },
       {
+        path: "/workflow",
+        label: "Action Queue",
+        icon: (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 3.5h12" />
+            <path d="M2 8h8" />
+            <path d="M2 12.5h6" />
+            <path d="M11.5 7.5l1.5 1.5 2.5-3" />
+          </svg>
+        ),
+      },
+      {
         path: "/review",
         label: "Review Queue",
         icon: (

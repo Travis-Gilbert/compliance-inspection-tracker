@@ -111,8 +111,8 @@ class SeedWorkflowDefaultsTests(TestCase):
 
         Program.objects.filter(key="FeaturedHomes").update(label="Changed")
         EmailTemplate.objects.filter(slug="monthly-compliance").update(
-            status="active",
-            is_active=True,
+            status="draft",
+            is_active=False,
         )
 
         call_command("seed_workflow_defaults", stdout=StringIO())
@@ -122,8 +122,8 @@ class SeedWorkflowDefaultsTests(TestCase):
         self.assertEqual(Program.objects.get(key="FeaturedHomes").label, "Featured Homes")
 
         template = EmailTemplate.objects.get(slug="monthly-compliance")
-        self.assertEqual(template.status, "draft")
-        self.assertFalse(template.is_active)
+        self.assertEqual(template.status, "active")
+        self.assertTrue(template.is_active)
         self.assertIn(ACTION_ATTEMPT_1, template.variants)
 
     def test_timing_service_can_read_seeded_program_rules(self):

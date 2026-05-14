@@ -29,7 +29,7 @@ function resolveApiUrl(path: string) {
 
 async function getErrorMessage(res: Response, fallback = `API error: ${res.status}`) {
   const err = await res.json().catch(() => ({ detail: res.statusText }));
-  return err.detail || fallback;
+  return err.detail || err.error || fallback;
 }
 
 async function request(path: string, options: RequestInit = {}) {
@@ -121,6 +121,43 @@ export const importCSVText = async (text: string) => {
 
 export const getStats = () =>
   request("/api/properties/stats/summary").then((r) => r.json());
+
+// Workflow
+export const getWorkflowActionQueue = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/workflow/action-queue${qs ? `?${qs}` : ""}`).then((r) => r.json());
+};
+
+export const getWorkflowTiming = (propertyId: number | string, params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/workflow/properties/${propertyId}/timing${qs ? `?${qs}` : ""}`).then((r) => r.json());
+};
+
+export const getWorkflowTemplatePreview = (
+  propertyId: number | string,
+  params: Record<string, string>,
+) => {
+  const qs = new URLSearchParams(params).toString();
+  return request(`/api/workflow/properties/${propertyId}/template-preview?${qs}`).then((r) => r.json());
+};
+
+export const getWorkflowComms = (propertyId: number | string) =>
+  request(`/api/workflow/properties/${propertyId}/communications`).then((r) => r.json());
+
+export const createWorkflowComm = (propertyId: number | string, data: Record<string, unknown>) =>
+  request(`/api/workflow/properties/${propertyId}/communications`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  }).then((r) => r.json());
+
+export const getWorkflowDocuments = (propertyId: number | string) =>
+  request(`/api/workflow/properties/${propertyId}/documents`).then((r) => r.json());
+
+export const createWorkflowLetterPacket = (data: Record<string, unknown>) =>
+  request("/api/workflow/letters/packet", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }).then((r) => r.json());
 
 // Imagery
 export const getImageryStatus = () =>

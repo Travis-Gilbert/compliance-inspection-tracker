@@ -16,11 +16,13 @@ from django.db.models import Count, Exists, OuterRef, Q, Avg, Min, Max, F, Value
 from django.http import HttpResponse, StreamingHttpResponse, FileResponse
 from ninja import NinjaAPI, Router, Query, File, Form, UploadedFile
 
-from tracker.models import Property, PropertyPhoto, Communication, ImportBatch
+from tracker.models import Document, Property, PropertyPhoto, Communication, EmailTemplate, ImportBatch
 from tracker.schemas import (
     PropertyCreate, PropertyUpdate, PropertyResponse,
     StatsResponse, ImportResult, BatchUpdateRequest,
     CommunicationCreate, CommunicationUpdate, CommunicationResponse,
+    WorkflowCommunicationCreate,
+    WorkflowLetterPacketCreate,
     PropertyPhotoResponse,
     RESOLVED_FINDINGS,
 )
@@ -31,6 +33,18 @@ from tracker.services.exporter import (
 from tracker.services.enrichment import (
     apply_priority_scores, filter_by_contact,
     haversine_clusters, summarize_buyers, parse_closing_date,
+)
+from tracker.services.workflow import (
+    apply_communication_rollups,
+    build_action_queue,
+    compute_property_timing,
+    prepare_workflow_communication,
+    render_template_preview,
+)
+from tracker.services.workflow_documents import (
+    create_communication_artifacts,
+    create_mail_packet_bundle,
+    list_property_documents,
 )
 from tracker.utils.address import build_address_key
 
@@ -46,6 +60,7 @@ imagery_router = Router(tags=["imagery"])
 detection_router = Router(tags=["detection"])
 comms_router = Router(tags=["communications"])
 pipeline_router = Router(tags=["pipeline"])
+workflow_router = Router(tags=["workflow"])
 
 
 # ============================================================
@@ -63,6 +78,7 @@ def root(request):
             "detection": "/api/detection",
             "communications": "/api/communications",
             "pipeline": "/api/pipeline",
+            "workflow": "/api/workflow",
             "docs": "/api/docs",
         },
     }
@@ -1315,6 +1331,49 @@ def detection_summary(request):
 # Communications Router
 # ============================================================
 
+def _workflow_communication_to_dict(comm: Communication) -> dict:
+    return {
+        "id": comm.id,
+        "property_id": comm.property_id,
+        "buyer_id": comm.buyer_id,
+        "template_id": comm.template_id,
+        "template_slug": comm.template.slug if comm.template else "",
+        "template_name": comm.template_name,
+        "method": comm.method,
+        "direction": comm.direction,
+        "action": comm.action,
+        "status": comm.status,
+        "recipient_email": comm.recipient_email,
+        "provider_message_id": comm.provider_message_id,
+        "date_sent": comm.date_sent.isoformat() if comm.date_sent else None,
+        "sent_at": comm.sent_at.isoformat() if comm.sent_at else None,
+        "approved_at": comm.approved_at.isoformat() if comm.approved_at else None,
+        "subject": comm.subject,
+        "body": comm.body,
+        "body_hash": comm.body_hash,
+        "response_received": comm.response_received,
+        "response_date": comm.response_date.isoformat() if comm.response_date else None,
+        "response_notes": comm.response_notes,
+        "created_at": comm.created_at.isoformat() if comm.created_at else None,
+    }
+
+
+def _workflow_document_to_dict(document: Document) -> dict:
+    return {
+        "id": document.id,
+        "property_id": document.property_id,
+        "communication_id": document.communication_id,
+        "filename": document.filename,
+        "storage_key": document.storage_key,
+        "storage_url": document.storage_url,
+        "mime_type": document.mime_type,
+        "size_bytes": document.size_bytes,
+        "category": document.category,
+        "slot": document.slot,
+        "metadata": document.metadata or {},
+        "created_at": document.created_at.isoformat() if document.created_at else None,
+    }
+
 @comms_router.get("/{property_id}")
 def list_communications(request, property_id: int):
     """List all communications for a property."""
@@ -1391,6 +1450,193 @@ def update_communication(request, comm_id: int, payload: CommunicationUpdate):
         "response_date": comm.response_date.isoformat() if comm.response_date else None,
         "response_notes": comm.response_notes,
         "created_at": comm.created_at.isoformat() if comm.created_at else None,
+    }
+
+
+# ============================================================
+# Workflow Router
+# ============================================================
+
+@workflow_router.get("/action-queue")
+def get_action_queue(request, as_of: Optional[date] = None, action: Optional[str] = None):
+    properties = (
+        Property.objects.select_related("buyer", "program_record")
+        .prefetch_related("communications", "action_items")
+        .order_by("id")
+    )
+    queue = build_action_queue(properties, as_of=as_of)
+    if action:
+        queue["groups"] = [group for group in queue["groups"] if group["action"] == action]
+        queue["summary"] = {group["action"]: group["count"] for group in queue["groups"]}
+        queue["totalItems"] = sum(group["count"] for group in queue["groups"])
+    return queue
+
+
+@workflow_router.get("/properties/{property_id}/timing")
+def get_property_timing(request, property_id: int, as_of: Optional[date] = None):
+    try:
+        prop = (
+            Property.objects.select_related("buyer", "program_record")
+            .prefetch_related("communications")
+            .get(pk=property_id)
+        )
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    timing = compute_property_timing(prop, as_of=as_of)
+    return timing.as_dict()
+
+
+@workflow_router.get("/properties/{property_id}/template-preview")
+def get_template_preview(
+    request,
+    property_id: int,
+    action: str,
+    template_slug: Optional[str] = None,
+    as_of: Optional[date] = None,
+):
+    try:
+        prop = (
+            Property.objects.select_related("buyer", "program_record")
+            .prefetch_related("communications")
+            .get(pk=property_id)
+        )
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    try:
+        return render_template_preview(prop, action=action, template_slug=template_slug, as_of=as_of)
+    except LookupError as exc:
+        return api.create_response(request, {"detail": str(exc)}, status=404)
+
+
+@workflow_router.get("/properties/{property_id}/communications")
+def list_workflow_communications(request, property_id: int):
+    if not Property.objects.filter(pk=property_id).exists():
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    comms = (
+        Communication.objects.select_related("template", "buyer")
+        .filter(property_id=property_id)
+        .order_by("-created_at")
+    )
+    return [_workflow_communication_to_dict(comm) for comm in comms]
+
+
+@workflow_router.get("/properties/{property_id}/documents")
+def list_workflow_documents(request, property_id: int):
+    try:
+        Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    documents = list_property_documents(property_id)
+    return [_workflow_document_to_dict(document) for document in documents]
+
+
+@workflow_router.post("/properties/{property_id}/communications")
+def create_workflow_communication(request, property_id: int, payload: WorkflowCommunicationCreate):
+    try:
+        prop = Property.objects.select_related("buyer", "program_record").get(pk=property_id)
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    try:
+        comm_data = prepare_workflow_communication(
+            prop,
+            method=payload.method,
+            direction=payload.direction,
+            action=payload.action,
+            status=payload.status,
+            template_slug=payload.template_slug,
+            recipient_email=payload.recipient_email,
+            date_sent=payload.date_sent,
+            sent_at=payload.sent_at,
+            approved_at=payload.approved_at,
+            provider_message_id=payload.provider_message_id,
+            subject=payload.subject,
+            body=payload.body,
+        )
+    except LookupError as exc:
+        return api.create_response(request, {"detail": str(exc)}, status=404)
+
+    template = None
+    if comm_data["template"]:
+        template = EmailTemplate.objects.filter(slug=comm_data["template"]).first()
+
+    artifacts: list[Document] = []
+    with transaction.atomic():
+        comm = Communication.objects.create(
+            property=prop,
+            buyer=comm_data["buyer"],
+            template=template,
+            template_name=comm_data["template_name"],
+            method=comm_data["method"],
+            direction=comm_data["direction"],
+            action=comm_data["action"],
+            status=comm_data["status"],
+            recipient_email=comm_data["recipient_email"],
+            date_sent=comm_data["date_sent"],
+            sent_at=comm_data["sent_at"],
+            approved_at=comm_data["approved_at"],
+            provider_message_id=comm_data["provider_message_id"],
+            subject=comm_data["subject"],
+            body=comm_data["body"],
+            body_hash=comm_data["body_hash"],
+        )
+        update_fields = apply_communication_rollups(
+            prop,
+            action=comm.action,
+            status=comm.status,
+            method=comm.method,
+            date_sent=comm.date_sent,
+        )
+        if update_fields:
+            prop.save(update_fields=sorted(set(update_fields + ["updated_at"])))
+        artifacts = create_communication_artifacts(prop, comm)
+
+    response = _workflow_communication_to_dict(comm)
+    if comm_data["preview"]:
+        response["preview"] = comm_data["preview"]
+    response["documents"] = [_workflow_document_to_dict(document) for document in artifacts]
+    return response
+
+
+@workflow_router.post("/letters/packet")
+def create_workflow_letter_packet(request, payload: WorkflowLetterPacketCreate):
+    property_ids = list(dict.fromkeys(payload.property_ids))
+    if not property_ids:
+        return api.create_response(request, {"detail": "At least one property ID is required"}, status=400)
+
+    properties = list(
+        Property.objects.select_related("buyer", "program_record")
+        .prefetch_related("communications")
+        .filter(id__in=property_ids)
+        .order_by("id")
+    )
+    if len(properties) != len(property_ids):
+        found_ids = {prop.id for prop in properties}
+        missing_ids = [property_id for property_id in property_ids if property_id not in found_ids]
+        return api.create_response(
+            request,
+            {"detail": f"Properties not found: {', '.join(str(item) for item in missing_ids)}"},
+            status=404,
+        )
+
+    try:
+        bundle = create_mail_packet_bundle(
+            properties,
+            action=payload.action,
+            template_slug=payload.template_slug,
+        )
+    except LookupError as exc:
+        return api.create_response(request, {"detail": str(exc)}, status=404)
+
+    return {
+        "batch_document": _workflow_document_to_dict(bundle["batch_document"]),
+        "manifest_document": _workflow_document_to_dict(bundle["manifest_document"]),
+        "letters": [_workflow_document_to_dict(document) for document in bundle["letters"]],
+        "audits": [_workflow_document_to_dict(document) for document in bundle["audits"]],
     }
 
 
@@ -1478,3 +1724,4 @@ api.add_router("/api/imagery", imagery_router)
 api.add_router("/api/detection", detection_router)
 api.add_router("/api/communications", comms_router)
 api.add_router("/api/pipeline", pipeline_router)
+api.add_router("/api/workflow", workflow_router)

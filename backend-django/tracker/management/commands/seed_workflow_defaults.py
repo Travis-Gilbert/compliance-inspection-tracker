@@ -180,7 +180,7 @@ DEFAULT_EMAIL_TEMPLATES = [
 
 
 class Command(BaseCommand):
-    help = "Seed default workflow programs and draft email templates"
+    help = "Seed default workflow programs and active email templates"
 
     def handle(self, *args, **options):
         program_created = 0
@@ -211,8 +211,8 @@ class Command(BaseCommand):
                 "name": template["name"],
                 "program_keys": template["program_keys"],
                 "variants": template["variants"],
-                "status": "draft",
-                "is_active": False,
+                "status": "active",
+                "is_active": True,
             }
             _, created = EmailTemplate.objects.update_or_create(
                 slug=template["slug"],

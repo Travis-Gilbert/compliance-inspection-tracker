@@ -32,6 +32,7 @@ export const RESOLVED_FINDINGS = [
 
 export const NAV_ITEMS = [
   { path: "/", label: "Dashboard", shortLabel: "DB" },
+  { path: "/workflow", label: "Action Queue", shortLabel: "AQ" },
   { path: "/review", label: "Review Queue", shortLabel: "RQ" },
   { path: "/map", label: "Compliance Map", shortLabel: "MP" },
   { path: "/before-after", label: "Before and After", shortLabel: "BA" },

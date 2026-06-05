@@ -185,6 +185,20 @@ class Property(models.Model):
     regrid_condition = models.CharField(max_length=100, default="", blank=True)
     portal_survey_date = models.DateField(null=True, blank=True)
 
+    # County assessor / ingest (County ArcGIS spine). Nullable so a layer missing an
+    # attribute does not break the sync. assessed/taxable values have no open County
+    # source yet (see MASTER-PLAN-AND-LANES findings); they stay null until one exists.
+    assessed_value = models.FloatField(null=True, blank=True)
+    taxable_value = models.FloatField(null=True, blank=True)
+    owner_of_record = models.CharField(max_length=255, default="", blank=True)
+    property_class = models.CharField(max_length=60, default="", blank=True)
+    land_use = models.CharField(max_length=120, default="", blank=True)
+    # Tax-distress signal from CountyRealProperty.Status (forfeiture/foreclosure codes).
+    forfeiture_status = models.CharField(max_length=20, default="", blank=True, db_index=True)
+    forfeiture_status_year = models.CharField(max_length=8, default="", blank=True)
+    # Parcel polygon as GeoJSON (no PostGIS column; geopandas rebuilds geometry from this).
+    boundary_geojson = models.JSONField(null=True, blank=True)
+
     # Import tracking
     import_batch = models.CharField(max_length=100, default="")
 
@@ -545,3 +559,120 @@ class ImportBatch(models.Model):
 
     def __str__(self):
         return f"{self.batch_id}: {self.filename} ({self.row_count} rows)"
+
+
+class DataSource(models.Model):
+    """External ingest source registry plus sync cursor.
+
+    Seeded from tracker/services/ingest/sources.py. The field_map and config live
+    here (DB-authoritative) so the County can rename a layer field without a code
+    change. last_cursor is the OBJECTID high-water (or edit-date) of the last
+    committed sync, written only after rows persist so a failed run re-pulls.
+    """
+
+    key = models.CharField(max_length=50, unique=True)
+    label = models.CharField(max_length=120, default="")
+    kind = models.CharField(max_length=30, default="arcgis")  # arcgis | http | attended_browser
+    base_url = models.URLField(default="", blank=True)
+    layer_id = models.CharField(max_length=20, default="", blank=True)
+    field_map = models.JSONField(default=dict, blank=True)  # source field -> model field
+    edit_date_field = models.CharField(max_length=80, default="", blank=True)
+    object_id_field = models.CharField(max_length=80, default="OBJECTID", blank=True)
+    config = models.JSONField(default=dict, blank=True)  # rest of the seed (max_record_count, address parts, status fields)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_cursor = models.CharField(max_length=120, default="", blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    notes = models.TextField(default="", blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["key"]
+
+    def __str__(self):
+        return f"{self.key} ({self.kind})"
+
+
+class SyncRun(models.Model):
+    """Per-run audit row for a DataSource sync, so a sync is never silently partial."""
+
+    source = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="runs")
+    started_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, default="running")  # running | ok | partial | failed
+    fetched = models.PositiveIntegerField(default=0)
+    matched = models.PositiveIntegerField(default=0)
+    updated = models.PositiveIntegerField(default=0)
+    unmatched = models.PositiveIntegerField(default=0)
+    detail = models.JSONField(default=dict, blank=True)  # errors, skipped parcels, notes
+
+    class Meta:
+        ordering = ["-started_at"]
+        indexes = [models.Index(fields=["source", "-started_at"])]
+
+    def __str__(self):
+        when = self.started_at.strftime("%Y-%m-%d %H:%M") if self.started_at else "unsaved"
+        return f"{self.source.key} {self.status} @ {when}"
+
+
+class ParcelValueSnapshot(models.Model):
+    """Per-parcel value/status history for the context-layer trajectory variant.
+
+    The County layer carries no assessed/taxable value today, so the actually-
+    populated signal here is forfeiture_status; assessed/taxable columns are kept
+    for when a value source exists. property is nullable so unmatched county
+    parcels can still record history.
+    """
+
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="value_snapshots",
+    )
+    parcel_id = models.CharField(max_length=20, db_index=True)
+    assessed_value = models.FloatField(null=True, blank=True)
+    taxable_value = models.FloatField(null=True, blank=True)
+    forfeiture_status = models.CharField(max_length=20, default="", blank=True)
+    source = models.CharField(max_length=40, default="county_arcgis")
+    observed_at = models.DateField()
+    raw = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-observed_at"]
+        unique_together = [("parcel_id", "observed_at", "source")]
+        indexes = [models.Index(fields=["parcel_id", "observed_at"])]
+
+    def __str__(self):
+        return f"{self.parcel_id} @ {self.observed_at} ({self.source})"
+
+
+class ServiceLineRecord(models.Model):
+    """Public service-line dataset (flintpipemap / BlueConduit) per parcel/address.
+
+    Lowest-priority feed; the sync (serviceline.py) is wired in the Phase 1 tail
+    once the published access form is confirmed.
+    """
+
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="service_lines",
+    )
+    parcel_id = models.CharField(max_length=20, default="", db_index=True)
+    address = models.TextField(default="")
+    material = models.CharField(max_length=60, default="", blank=True)  # copper | lead | galvanized | unknown
+    verified_date = models.DateField(null=True, blank=True)
+    replacement_status = models.CharField(max_length=60, default="", blank=True)
+    source = models.CharField(max_length=50, default="flintpipemap")
+    raw = models.JSONField(default=dict, blank=True)
+    synced_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["parcel_id"])]
+
+    def __str__(self):
+        return f"{self.parcel_id}: {self.material or 'unknown'}"

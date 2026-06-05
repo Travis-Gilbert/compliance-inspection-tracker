@@ -127,6 +127,18 @@ IMAGERY_CONCURRENCY = env.int("IMAGERY_CONCURRENCY", default=6)
 DETECTION_WORKERS = env.int("DETECTION_WORKERS", default=4)
 PIPELINE_BATCH_SIZE = env.int("PIPELINE_BATCH_SIZE", default=100)
 
+# GraphQL is the org-facing atlas integration surface. Django Ninja remains
+# available for the standalone tracker frontend and CSV power-tool flows.
+STRAWBERRY_DJANGO = {
+    "FIELD_DESCRIPTION_FROM_HELP_TEXT": True,
+    "TYPE_DESCRIPTION_FROM_MODEL_DOCSTRING": True,
+    "MUTATIONS_DEFAULT_ARGUMENT_NAME": "input",
+    "MUTATIONS_DEFAULT_HANDLE_ERRORS": True,
+    "GENERATE_ENUMS_FROM_CHOICES": False,
+    "DEFAULT_PK_FIELD_NAME": "id",
+    "PAGINATION_DEFAULT_LIMIT": 250,
+}
+
 # Google Maps API endpoints
 STREETVIEW_URL = "https://maps.googleapis.com/maps/api/streetview"
 STREETVIEW_METADATA_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"

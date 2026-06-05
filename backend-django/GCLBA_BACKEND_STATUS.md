@@ -33,10 +33,23 @@ a Strawberry mutation can be added if you prefer GraphQL, but is not required).
 - `CountyRealProperty` layer 0 is ~232 County-owned / tax-reverted parcels (not the full
   county). `Status` (NCFD/CFD/...) is the forfeiture/foreclosure signal.
 
+## Done: Phase 2 neighborhood-context compute (migration 0005)
+- `NeighborhoodContextScore` model (LISA scores: z_score, spatial_lag, moran_cluster,
+  moran_p, gi_star, neighbor_parcel_ids).
+- `tracker/services/context/`: `signals.py` (tax_distress/sale_recency/compliance;
+  assessed_value yields None until a source exists), `weights.py` (KNN default;
+  Queen/Rook need geopandas), `lisa.py` (Local Moran + local z + Getis-Ord), `composite.py`.
+- `compute_context_scores` command; `sync_county_parcels --recompute-context` post-sync trigger.
+- New deps: libpysal, esda (installed); geopandas for contiguity (later).
+- Validated: makemigrations 0005, manage.py check, and a synthetic LISA fixture
+  (planted high-on-low outlier classifies HL, z=+6.0). DB upsert path deferred to
+  the remote Postgres (no local DB), same as Phase 1.
+- First signal is tax_distress (forfeiture Status), NOT assessed value (no open source).
+
 ## Next (Claude backend)
-- Phase 2: `tracker/services/context/` (signals, KNN weights, Local Moran via
-  libpysal/esda) + `NeighborhoodContextScore` + `compute_context_scores`. New deps:
-  geopandas/libpysal/esda. Next migration number is 0005.
-- Phase 4: compliance reconciliation (CaseEvent + 5-category tagging + weekly report +
-  remote verification rail). ComplianceCase.status is a separate axis from ActionItem;
-  deadline_engine maps compliance_timing -> status, does not touch ActionItem rows.
+- Phase 4: compliance reconciliation. ComplianceCase.status is a separate axis from
+  ActionItem; deadline_engine maps compliance_timing -> status, does not touch ActionItem
+  rows. CaseEvent + 5-category tagging + weekly report (HTML+PDF) + remote verification
+  rail (Building_Permits_Current_Year permits -> assessment changes -> buyer photos w/ EXIF).
+- Cross-cutting: extend the Strawberry schema with NeighborhoodContextScore + ingest-status
+  + compliance types as each lands; 4b separate buyer self-service public surface.

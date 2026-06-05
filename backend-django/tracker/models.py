@@ -676,3 +676,40 @@ class ServiceLineRecord(models.Model):
 
     def __str__(self):
         return f"{self.parcel_id}: {self.material or 'unknown'}"
+
+
+class NeighborhoodContextScore(models.Model):
+    """Per-parcel condition scored relative to its local spatial neighborhood (LISA).
+
+    First-class and persisted (not computed at view time). One row per
+    (parcel_id, neighborhood_def, signal). neighbor_parcel_ids stores the exact
+    reference set so the frontend can highlight it without recomputing.
+    """
+
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="context_scores",
+    )
+    parcel_id = models.CharField(max_length=20, db_index=True)
+    neighborhood_def = models.CharField(max_length=20)  # knn8 | queen | rook | faceblock | blockgroup
+    signal = models.CharField(max_length=40)  # tax_distress | sale_recency | compliance | assessed_value | composite
+    parcel_value = models.FloatField(null=True, blank=True)
+    local_mean = models.FloatField(null=True, blank=True)
+    local_std = models.FloatField(null=True, blank=True)
+    z_score = models.FloatField(null=True, blank=True)
+    spatial_lag = models.FloatField(null=True, blank=True)
+    moran_cluster = models.CharField(max_length=2, default="NS")  # HH | LL | HL | LH | NS
+    moran_p = models.FloatField(null=True, blank=True)
+    gi_star = models.FloatField(null=True, blank=True)
+    neighbor_parcel_ids = models.JSONField(default=list, blank=True)
+    computed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["parcel_id", "neighborhood_def", "signal"])]
+        unique_together = [("parcel_id", "neighborhood_def", "signal")]
+
+    def __str__(self):
+        return f"{self.parcel_id} {self.signal}/{self.neighborhood_def}: {self.moran_cluster}"

@@ -25,6 +25,11 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true", help="pull + map live features, no DB")
         parser.add_argument("--reseed", action="store_true", help="force-refresh DataSource rows from sources.py")
         parser.add_argument("--reset-cursor", action="store_true", help="clear last_cursor before syncing")
+        parser.add_argument(
+            "--recompute-context",
+            action="store_true",
+            help="after a successful sync, recompute neighborhood-context scores (full set, for spatial correctness)",
+        )
 
     def handle(self, *args, **opts):
         if opts["dry_run"]:
@@ -57,6 +62,14 @@ class Command(BaseCommand):
         self.stdout.write(style(line))
         if result.errors:
             self.stderr.write(self.style.ERROR("errors: " + "; ".join(result.errors)))
+
+        if opts["recompute_context"] and run.status == "ok" and result.updated:
+            # Full recompute: LISA needs each parcel's complete neighborhood, so a
+            # changed-only scope would build wrong neighbor sets. Cheap at this scale.
+            from tracker.services.context import lisa
+
+            context_result = lisa.compute_and_store()
+            self.stdout.write(self.style.SUCCESS(f"context recompute: {context_result}"))
 
     def _dry_run(self, opts):
         seed = sources.seed_for(opts["key"]) or sources.COUNTY_PARCELS

@@ -3,6 +3,7 @@ import builtins
 from django.core.validators import FileExtensionValidator
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 
 def property_photo_upload_to(instance, filename):
@@ -713,3 +714,177 @@ class NeighborhoodContextScore(models.Model):
 
     def __str__(self):
         return f"{self.parcel_id} {self.signal}/{self.neighborhood_def}: {self.moran_cluster}"
+
+
+# Five-category activity tagging (Freeman's duty areas). The percentages are the
+# weekly-report denominators, not a constraint on logging. category_tag on every
+# CaseEvent / ComplianceObservation is what makes the report write itself.
+CATEGORY_TAG_CHOICES = [
+    ("oversight_enforcement", "Compliance Oversight & Enforcement"),
+    ("data_governance", "Project Tracking & Data Governance"),
+    ("tech_infrastructure", "Technology & Sales Infrastructure Support"),
+    ("stakeholder_coordination", "Stakeholder & Interdepartmental Coordination"),
+    ("operational_support", "Operational Support & Continuity"),
+]
+CATEGORY_TARGET_PCT = {
+    "oversight_enforcement": 40,
+    "data_governance": 35,
+    "tech_infrastructure": 10,
+    "stakeholder_coordination": 10,
+    "operational_support": 5,
+}
+
+
+class ComplianceCase(models.Model):
+    """One per disposed property; lifecycle state distinct from the ActionItem queue.
+
+    Anchored to a parcel via Property (spatial truth not duplicated). status is the
+    lifecycle axis; it is a different axis from ActionItem (the actionable queue
+    row). The deadline engine maps compliance_timing -> this status and never
+    creates or closes ActionItem rows.
+    """
+
+    PROGRAM_CHOICES = [
+        ("featured_homes", "Featured Homes"),
+        ("vip", "VIP"),
+        ("demolition", "Demolition"),
+        ("ready_for_rehab", "Ready for Rehab"),
+    ]
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("on_track", "On Track"),
+        ("at_risk", "At Risk"),
+        ("non_compliant", "Non-Compliant"),
+        ("escalated", "Escalated"),
+        ("closed", "Closed"),
+    ]
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name="compliance_cases")
+    parcel_id = models.CharField(max_length=20, db_index=True)
+    program = models.CharField(max_length=30, choices=PROGRAM_CHOICES, default="", db_index=True)
+    buyer = models.ForeignKey(
+        Buyer, null=True, blank=True, on_delete=models.SET_NULL, related_name="compliance_cases"
+    )
+    sale_date = models.DateField(null=True, blank=True)
+    rehab_deadline = models.DateField(null=True, blank=True)  # sale_date + 12 months
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", db_index=True)
+    current_confidence = models.FloatField(null=True, blank=True)
+    source_links = models.JSONField(default=dict, blank=True)  # {filemaker_id, regrid_id, gis_feature_id}
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "program"]),
+            models.Index(fields=["parcel_id"]),
+        ]
+
+    def __str__(self):
+        return f"Case {self.parcel_id} [{self.program}] {self.status}"
+
+
+class DeedRestriction(models.Model):
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("satisfied", "Satisfied"),
+        ("breached", "Breached"),
+        ("expired", "Expired"),
+    ]
+
+    case = models.ForeignKey(ComplianceCase, on_delete=models.CASCADE, related_name="deed_restrictions")
+    kind = models.CharField(max_length=80, default="")  # owner_occupancy, no_resale_window, use_restriction, ...
+    term_start = models.DateField(null=True, blank=True)
+    term_end = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", db_index=True)
+
+    def __str__(self):
+        return f"{self.kind} ({self.status})"
+
+
+class Benchmark(models.Model):
+    """An enforceable rehab milestone with a due date and evidence."""
+
+    case = models.ForeignKey(ComplianceCase, on_delete=models.CASCADE, related_name="benchmarks")
+    label = models.CharField(max_length=120)  # e.g. "exterior weatherproofing", "occupancy"
+    due_date = models.DateField(null=True, blank=True)
+    met = models.BooleanField(default=False)
+    met_on = models.DateField(null=True, blank=True)
+    evidence_refs = models.JSONField(default=list, blank=True)  # ComplianceObservation ids
+
+    class Meta:
+        ordering = ["due_date", "id"]
+
+    def __str__(self):
+        return f"{self.label} ({'met' if self.met else 'open'})"
+
+
+class ComplianceObservation(models.Model):
+    """A piece of compliance evidence; mirrors the Lost Flint observation pattern."""
+
+    KIND_CHOICES = [
+        ("photo", "Photo"),
+        ("permit", "Permit"),
+        ("aerial_change", "Aerial Change"),
+        ("assessment_change", "Assessment Change"),
+        ("deed_milestone", "Deed Milestone"),
+        ("inspection_note", "Inspection Note"),
+        ("correspondence", "Correspondence"),
+    ]
+    SOURCE_CHOICES = [
+        ("buyer_submission", "Buyer Submission"),
+        ("city_permits", "City Permits"),
+        ("regrid", "Regrid"),
+        ("ortho_imagery", "Ortho Imagery"),
+        ("mapillary", "Mapillary"),
+        ("manual", "Manual"),
+    ]
+
+    case = models.ForeignKey(ComplianceCase, on_delete=models.CASCADE, related_name="observations")
+    observed_at = models.DateTimeField(default=timezone.now, db_index=True)
+    kind = models.CharField(max_length=30, choices=KIND_CHOICES, db_index=True)
+    source = models.CharField(max_length=30, choices=SOURCE_CHOICES, default="manual")
+    geo = models.JSONField(null=True, blank=True)  # {"lat":..,"lon":..}; no PostGIS point on this model
+    exif = models.JSONField(null=True, blank=True)  # capture_time, gps, device (preserved for photos)
+    artifact_ref = models.CharField(max_length=500, default="", blank=True)  # S3 key of the archived artifact
+    document = models.ForeignKey(
+        Document, null=True, blank=True, on_delete=models.SET_NULL, related_name="compliance_observations"
+    )
+    confidence = models.FloatField(null=True, blank=True)
+    category_tag = models.CharField(max_length=30, choices=CATEGORY_TAG_CHOICES, default="oversight_enforcement", db_index=True)
+    created_by = models.CharField(max_length=100, default="staff")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-observed_at"]
+        indexes = [
+            models.Index(fields=["case", "-observed_at"]),
+            models.Index(fields=["category_tag", "-observed_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} via {self.source} ({self.observed_at:%Y-%m-%d})"
+
+
+class CaseEvent(models.Model):
+    """Audit trail: every status change / action, with the category_tag the weekly
+    report groups by. Factual only (the schema has no field for motive or strategy)."""
+
+    case = models.ForeignKey(ComplianceCase, on_delete=models.CASCADE, related_name="events")
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    transition = models.CharField(max_length=120, default="")  # the state change or action taken
+    actor = models.CharField(max_length=100, default="staff")
+    evidence_refs = models.JSONField(default=list, blank=True)  # ComplianceObservation ids
+    category_tag = models.CharField(max_length=30, choices=CATEGORY_TAG_CHOICES, default="oversight_enforcement", db_index=True)
+    note = models.TextField(default="", blank=True)  # factual only
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at"]
+        indexes = [
+            models.Index(fields=["case", "-occurred_at"]),
+            models.Index(fields=["category_tag", "-occurred_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.transition or 'event'} [{self.category_tag}] ({self.occurred_at:%Y-%m-%d})"

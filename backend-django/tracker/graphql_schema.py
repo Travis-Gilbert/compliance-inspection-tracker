@@ -7,6 +7,9 @@ from django.db.models import Count, Prefetch, Q
 from strawberry.file_uploads import Upload
 from strawberry.scalars import JSON
 from strawberry_django.optimizer import DjangoOptimizerExtension
+from strawberry.tools import merge_types
+
+from tracker.graphql_context import ComplianceQuery, ContextQuery
 
 from tracker.models import (
     ActionItem,
@@ -725,8 +728,12 @@ class Mutation:
         )
 
 
+# Merge the GCLBA context + compliance queries (defined in graphql_context, Claude
+# lane) into the workflow Query so the fork reaches them over one schema.
+CombinedQuery = merge_types("Query", (Query, ContextQuery, ComplianceQuery))
+
 schema = strawberry.Schema(
-    query=Query,
+    query=CombinedQuery,
     mutation=Mutation,
     extensions=[DjangoOptimizerExtension],
 )

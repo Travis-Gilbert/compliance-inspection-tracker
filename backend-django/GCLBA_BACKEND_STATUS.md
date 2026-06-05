@@ -53,13 +53,21 @@ a Strawberry mutation can be added if you prefer GraphQL, but is not required).
 - Slice B: deadline.py escalation engine (consumes compliance_timing + Benchmarks -> case
   status, logs CaseEvent, NO ActionItem writes); evaluate_compliance_cases command.
 
-## Next (Claude backend) - increasingly on the SHARED surface; coordinate with Codex
-- Phase 4 Slice C verification rail. CLEAN (Claude-owned): city permits ingest
-  (Building_Permits_Current_Year -> permit ComplianceObservations, reuses arcgis_client)
-  and assessment-change detection (ParcelValueSnapshot deltas -> assessment_change
-  observations). SHARED: buyer-photo EXIF GPS extraction touches the upload path
-  (api.py / workflow_documents) that Codex's 74141c2 owns -> COORDINATE before editing.
-- Cross-cutting GraphQL: expose NeighborhoodContextScore + compliance types + ingest status
-  on graphql_schema.py. That file is SHARED (Codex added upload_property_document in 74141c2)
-  -> coordinate before editing to avoid collision.
-- 4b buyer self-service public surface (separate, narrow scoped endpoint).
+## Done: verification rail (Slice C, 7d93a3f) + GraphQL exposure
+- Slice C: sync_building_permits (permit ComplianceObservations) + detect_assessment_changes.
+- GraphQL: tracker/graphql_context.py merged via strawberry.tools.merge_types (graphql_schema.py
+  gained only an import + the schema line, low collision). The fork can now query:
+  contextScores(neighborhoodDef, signal, parcelIds) / contextScore(parcelId, ...);
+  complianceCases(status, program) / complianceCase(parcelId) / caseEvents(parcelId);
+  weeklyReport(weekOf). Codex Phase 3 viz can swap its synthetic fixture for live contextScores.
+
+## Remaining
+- Claude (small/optional): buyer-photo EXIF GPS extraction (shared upload path; coordinate before
+  editing api.py/workflow_documents); 4b buyer self-service public surface (new narrow scoped
+  endpoint); service-line sync (lowest priority, source not yet resolved); aerial/street-level
+  change detection (spec marks these later refinements).
+- Codex (frontend lane): Phase 3 context viz (design-gated) + live-swap to contextScores;
+  Phase 5 remaining integration; deploy (separate GCLBA RustyRed + Vercel + retire portal) needs
+  Travis go-ahead.
+- End-to-end run of all syncs/compute/report needs the Railway Postgres (no local DB here); every
+  unit was validated via makemigrations / check / live dry-run / SDL generation / pure-math tests.

@@ -45,6 +45,7 @@ from tracker.services.workflow_documents import (
     create_communication_artifacts,
     create_mail_packet_bundle,
     list_property_documents,
+    save_uploaded_property_document,
 )
 from tracker.utils.address import build_address_key
 
@@ -1532,6 +1533,33 @@ def list_workflow_documents(request, property_id: int):
 
     documents = list_property_documents(property_id)
     return [_workflow_document_to_dict(document) for document in documents]
+
+
+@workflow_router.post("/properties/{property_id}/documents")
+def upload_workflow_document(
+    request,
+    property_id: int,
+    file: UploadedFile = File(...),
+    category: str = Form("property_document"),
+    slot: str = Form("manual_upload"),
+    description: str = Form(""),
+):
+    try:
+        prop = Property.objects.get(pk=property_id)
+    except Property.DoesNotExist:
+        return api.create_response(request, {"detail": "Property not found"}, status=404)
+
+    if not file.name:
+        return api.create_response(request, {"detail": "Upload must include a filename"}, status=400)
+
+    document = save_uploaded_property_document(
+        prop,
+        file,
+        category=category,
+        slot=slot,
+        metadata={"description": description.strip()} if description.strip() else {},
+    ).document
+    return _workflow_document_to_dict(document)
 
 
 @workflow_router.post("/properties/{property_id}/communications")

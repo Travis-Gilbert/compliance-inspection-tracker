@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
 from django.utils import timezone
 
 from tracker.models import Communication, Document, Property
@@ -34,6 +35,50 @@ def list_property_documents(property_id: int) -> list[Document]:
         .select_related("communication")
         .order_by("-created_at", "-id")
     )
+
+
+def save_uploaded_property_document(
+    property_obj: Property,
+    upload: UploadedFile,
+    *,
+    category: str = "property_document",
+    slot: str = "manual_upload",
+    metadata: dict[str, Any] | None = None,
+) -> GeneratedArtifact:
+    original_name = Path(upload.name or "upload.bin").name or "upload.bin"
+    stored_filename = _uploaded_document_filename(original_name)
+    safe_category = _document_token(category, default="property_document", max_length=50)
+    safe_slot = _document_token(slot, default="manual_upload", max_length=100)
+    relative_path = _document_relative_path(safe_category, property_obj, stored_filename)
+    absolute_path = _document_absolute_path(relative_path)
+    absolute_path.parent.mkdir(parents=True, exist_ok=True)
+
+    size_bytes = 0
+    with absolute_path.open("wb") as handle:
+        for chunk in _upload_chunks(upload):
+            handle.write(chunk)
+            size_bytes += len(chunk)
+
+    content_type = getattr(upload, "content_type", "") or ""
+    document = Document.objects.create(
+        property=property_obj,
+        communication=None,
+        filename=original_name,
+        storage_key=relative_path.as_posix(),
+        storage_url=_document_url(relative_path),
+        mime_type=content_type,
+        size_bytes=size_bytes or absolute_path.stat().st_size,
+        category=safe_category,
+        slot=safe_slot,
+        metadata={
+            "kind": "manual_upload",
+            "originalFilename": original_name,
+            "storedFilename": stored_filename,
+            "contentType": content_type,
+            **(metadata or {}),
+        },
+    )
+    return GeneratedArtifact(document=document, path=absolute_path)
 
 
 def create_communication_artifacts(property_obj: Property, communication: Communication) -> list[Document]:
@@ -290,6 +335,31 @@ def _document_absolute_path(relative_path: Path) -> Path:
 def _document_url(relative_path: Path) -> str:
     media_base = settings.MEDIA_URL.rstrip("/")
     return f"{media_base}/{relative_path.as_posix()}"
+
+
+def _uploaded_document_filename(filename: str) -> str:
+    path = Path(filename)
+    suffix = path.suffix.lower()
+    stem = _slugify(path.stem or "upload")
+    stamp = timezone.localtime(timezone.now()).strftime("%Y%m%d-%H%M%S-%f")
+    max_stem_length = max(1, 255 - len(stamp) - len(suffix) - 1)
+    return f"{stamp}-{stem[:max_stem_length]}{suffix}"
+
+
+def _document_token(value: str, *, default: str, max_length: int) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", (value or "").strip().lower()).strip("_-")
+    return (cleaned or default)[:max_length]
+
+
+def _upload_chunks(upload: UploadedFile) -> Iterable[bytes]:
+    chunks = getattr(upload, "chunks", None)
+    if callable(chunks):
+        yield from chunks()
+        return
+
+    content = upload.read()
+    if content:
+        yield content
 
 
 def _slugify(value: str) -> str:

@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from tracker.models import ActionItem, Communication, Document, EmailTemplate, Property
@@ -327,6 +328,51 @@ class WorkflowApiTests(TestCase):
                 batch_path = Path(tmpdir) / payload["batch_document"]["storage_key"]
                 self.assertTrue(batch_path.exists())
                 self.assertIn("mail packet", batch_path.read_text(encoding="utf-8").lower())
+
+    def test_property_document_upload_endpoint_writes_document_file(self):
+        prop = Property.objects.create(
+            address="606 Upload Ave",
+            parcel_id="41-06-555-010",
+            buyer_name="Upload Buyer",
+            email="upload@example.com",
+            program="Featured Homes",
+            closing_date="2026-01-01",
+        )
+        upload = SimpleUploadedFile(
+            "inspection report.pdf",
+            b"parcel document bytes",
+            content_type="application/pdf",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.settings(MEDIA_ROOT=Path(tmpdir), MEDIA_URL="/images/"):
+                response = self.client.post(
+                    f"/api/workflow/properties/{prop.id}/documents",
+                    data={
+                        "file": upload,
+                        "category": "inspection_report",
+                        "slot": "field_note",
+                        "description": "Uploaded after field review.",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["filename"], "inspection report.pdf")
+                self.assertEqual(payload["category"], "inspection_report")
+                self.assertEqual(payload["slot"], "field_note")
+                self.assertEqual(payload["mime_type"], "application/pdf")
+                self.assertEqual(payload["size_bytes"], len(b"parcel document bytes"))
+                self.assertTrue(payload["storage_url"].startswith("/images/generated_documents/"))
+                self.assertEqual(payload["metadata"]["description"], "Uploaded after field review.")
+
+                stored_path = Path(tmpdir) / payload["storage_key"]
+                self.assertTrue(stored_path.exists())
+                self.assertEqual(stored_path.read_bytes(), b"parcel document bytes")
+
+                property_docs = self.client.get(f"/api/workflow/properties/{prop.id}/documents")
+                self.assertEqual(property_docs.status_code, 200)
+                self.assertEqual(property_docs.json()[0]["id"], payload["id"])
 
     def test_mail_packet_generation_returns_404_without_creating_artifacts_for_missing_template(self):
         prop = Property.objects.create(

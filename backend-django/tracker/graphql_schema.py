@@ -4,6 +4,7 @@ import strawberry
 import strawberry_django
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
+from strawberry.file_uploads import Upload
 from strawberry.scalars import JSON
 from strawberry_django.optimizer import DjangoOptimizerExtension
 
@@ -26,6 +27,7 @@ from tracker.services.workflow import (
 from tracker.services.workflow_documents import (
     create_communication_artifacts,
     list_property_documents,
+    save_uploaded_property_document,
 )
 
 
@@ -380,6 +382,13 @@ class CommunicationMutationPayload:
     errors: list[str]
 
 
+@strawberry.type
+class DocumentMutationPayload:
+    ok: bool
+    document: DocumentType | None
+    errors: list[str]
+
+
 def _property_queryset():
     return (
         Property.objects.select_related("buyer", "program_record")
@@ -676,6 +685,42 @@ class Mutation:
             ok=True,
             communication=comm,
             documents=list(documents),
+            errors=[],
+        )
+
+    @strawberry.mutation
+    def upload_property_document(
+        self,
+        property_id: int,
+        file: Upload,
+        category: str = "property_document",
+        slot: str = "manual_upload",
+        description: str = "",
+    ) -> DocumentMutationPayload:
+        prop = Property.objects.filter(id=property_id).first()
+        if not prop:
+            return DocumentMutationPayload(
+                ok=False,
+                document=None,
+                errors=[f"Property {property_id} was not found."],
+            )
+        if not getattr(file, "name", ""):
+            return DocumentMutationPayload(
+                ok=False,
+                document=None,
+                errors=["Upload must include a filename."],
+            )
+
+        artifact = save_uploaded_property_document(
+            prop,
+            file,
+            category=category,
+            slot=slot,
+            metadata={"description": description.strip()} if description.strip() else {},
+        )
+        return DocumentMutationPayload(
+            ok=True,
+            document=artifact.document,
             errors=[],
         )
 

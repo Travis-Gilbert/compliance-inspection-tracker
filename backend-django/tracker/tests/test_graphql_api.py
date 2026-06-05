@@ -1,11 +1,14 @@
 import json
 from datetime import date
 from io import StringIO
+from pathlib import Path
+import tempfile
 
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
-from tracker.models import ActionItem, Communication, Property
+from tracker.models import ActionItem, Communication, Document, Property
 from tracker.services.compliance_timing import ACTION_ATTEMPT_1
 
 
@@ -172,6 +175,96 @@ class GraphqlApiTests(TestCase):
         self.assertEqual(mutation["communication"]["recipientEmail"], "keisha@example.com")
         self.assertGreaterEqual(len(mutation["documents"]), 1)
         self.assertEqual(Communication.objects.count(), 1)
+
+    def test_upload_property_document_mutation_writes_document_metadata(self):
+        prop = Property.objects.create(
+            address="222 GraphQL Upload St",
+            parcel_id="41-06-222-010",
+            buyer_name="GraphQL Upload",
+            email="graphql-upload@example.com",
+            program="Featured Homes",
+            closing_date="2026-01-01",
+        )
+
+        operations = {
+            "query": """
+            mutation UploadPropertyDocument(
+              $propertyId: Int!
+              $file: Upload!
+              $category: String!
+              $slot: String!
+              $description: String!
+            ) {
+              uploadPropertyDocument(
+                propertyId: $propertyId
+                file: $file
+                category: $category
+                slot: $slot
+                description: $description
+              ) {
+                ok
+                errors
+                document {
+                  id
+                  propertyId
+                  filename
+                  storageKey
+                  storageUrl
+                  mimeType
+                  sizeBytes
+                  category
+                  slot
+                  metadata
+                }
+              }
+            }
+            """,
+            "variables": {
+                "propertyId": prop.id,
+                "file": None,
+                "category": "closing_packet",
+                "slot": "signed_docs",
+                "description": "Closing packet from staff review.",
+            },
+        }
+        upload = SimpleUploadedFile(
+            "closing packet.txt",
+            b"closing packet bytes",
+            content_type="text/plain",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.settings(MEDIA_ROOT=Path(tmpdir), MEDIA_URL="/images/"):
+                response = self.client.post(
+                    "/graphql",
+                    data={
+                        "operations": json.dumps(operations),
+                        "map": json.dumps({"0": ["variables.file"]}),
+                        "0": upload,
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertNotIn("errors", payload)
+                mutation = payload["data"]["uploadPropertyDocument"]
+                self.assertTrue(mutation["ok"])
+                self.assertEqual(mutation["errors"], [])
+                document = mutation["document"]
+                self.assertEqual(document["propertyId"], prop.id)
+                self.assertEqual(document["filename"], "closing packet.txt")
+                self.assertEqual(document["category"], "closing_packet")
+                self.assertEqual(document["slot"], "signed_docs")
+                self.assertEqual(document["mimeType"], "text/plain")
+                self.assertEqual(document["sizeBytes"], len(b"closing packet bytes"))
+                self.assertEqual(
+                    document["metadata"]["description"],
+                    "Closing packet from staff review.",
+                )
+
+                saved = Document.objects.get(pk=document["id"])
+                self.assertEqual(saved.property_id, prop.id)
+                self.assertEqual((Path(tmpdir) / document["storageKey"]).read_bytes(), b"closing packet bytes")
 
     def test_action_queue_query_exposes_filtered_grouped_items(self):
         prop = Property.objects.create(

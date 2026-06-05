@@ -71,8 +71,15 @@ BUILDING_PERMITS = {
     "kind": "arcgis",
     "base_url": "https://services2.arcgis.com/5ckbIY7K9TUKoseK/arcgis/rest/services/Building_Permits_Current_Year/FeatureServer",
     "layer_id": 0,
+    "object_id_field": "OBJECTID",
+    "edit_date_field": "",  # no edit-date field -> OBJECTID high-water diffing
+    "max_record_count": 2000,
+    "out_sr": 4326,
+    # Permits create ComplianceObservations (not Property upserts). Date is derived
+    # from Year + Month ("a) January"); permit after sale_date = rehab signal.
+    "parcel_id_field": "Parcel_ID",
     "field_map": {},
-    "is_active": False,
+    "is_active": True,
 }
 
 # Service-line infrastructure (flintpipemap / BlueConduit). Access form confirmed at

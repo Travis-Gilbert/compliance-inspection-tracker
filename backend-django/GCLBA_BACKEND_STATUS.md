@@ -46,10 +46,20 @@ a Strawberry mutation can be added if you prefer GraphQL, but is not required).
   the remote Postgres (no local DB), same as Phase 1.
 - First signal is tax_distress (forfeiture Status), NOT assessed value (no open source).
 
-## Next (Claude backend)
-- Phase 4: compliance reconciliation. ComplianceCase.status is a separate axis from
-  ActionItem; deadline_engine maps compliance_timing -> status, does not touch ActionItem
-  rows. CaseEvent + 5-category tagging + weekly report (HTML+PDF) + remote verification
-  rail (Building_Permits_Current_Year permits -> assessment changes -> buyer photos w/ EXIF).
-- Cross-cutting: extend the Strawberry schema with NeighborhoodContextScore + ingest-status
-  + compliance types as each lands; 4b separate buyer self-service public surface.
+## Done: Phase 4 compliance Slices A + B (migration 0006, commits 2616e74 + 4591567)
+- Slice A: ComplianceCase / DeedRestriction / Benchmark / ComplianceObservation / CaseEvent
+  + 5-category tagging; tracker/services/compliance/ cases.py (activity logger) + report.py
+  (weekly report text/HTML, optional weasyprint PDF); generate_weekly_report command.
+- Slice B: deadline.py escalation engine (consumes compliance_timing + Benchmarks -> case
+  status, logs CaseEvent, NO ActionItem writes); evaluate_compliance_cases command.
+
+## Next (Claude backend) - increasingly on the SHARED surface; coordinate with Codex
+- Phase 4 Slice C verification rail. CLEAN (Claude-owned): city permits ingest
+  (Building_Permits_Current_Year -> permit ComplianceObservations, reuses arcgis_client)
+  and assessment-change detection (ParcelValueSnapshot deltas -> assessment_change
+  observations). SHARED: buyer-photo EXIF GPS extraction touches the upload path
+  (api.py / workflow_documents) that Codex's 74141c2 owns -> COORDINATE before editing.
+- Cross-cutting GraphQL: expose NeighborhoodContextScore + compliance types + ingest status
+  on graphql_schema.py. That file is SHARED (Codex added upload_property_document in 74141c2)
+  -> coordinate before editing to avoid collision.
+- 4b buyer self-service public surface (separate, narrow scoped endpoint).

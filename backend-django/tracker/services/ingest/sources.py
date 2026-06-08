@@ -14,9 +14,15 @@ See docs/GCLBA PLAN 6-5/MASTER-PLAN-AND-LANES.md for findings.
 from __future__ import annotations
 
 # Unmatched-parcel policy: parcels arriving from the County that match no tracked
-# Property. "skip" for the GCLBA build (only sold/tracked parcels); "write" for the
-# public Open Flint Atlas build (every county parcel becomes a parcel row).
-UNMATCHED_PARCEL_POLICY = "skip"
+# Property. "write" creates each as a Property row (no compliance case), "skip"
+# records only a value snapshot.
+# GCLBA uses "write": SPEC-GCLBA-COUNTY-ARCGIS-INGEST states the neighborhood-
+# context layer's condition signals (forfeiture status) come from this County
+# feed, so the county tax-reverted parcels must exist as Property rows for the
+# context layer to score them. "skip" would leave tax_distress empty and break
+# that data flow. The spec sanctions "write them as parcels without a compliance
+# case" for the GCLBA build.
+UNMATCHED_PARCEL_POLICY = "write"
 
 # Polite client identity for the shared (open-data) ArcGIS server.
 USER_AGENT = "OurCivicAtlas-GCLBA/1.0 (Genesee County open-data ingest)"

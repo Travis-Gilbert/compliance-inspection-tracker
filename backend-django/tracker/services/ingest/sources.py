@@ -34,6 +34,9 @@ COUNTY_PARCELS = {
     "edit_date_field": "",
     "max_record_count": 2000,
     "out_sr": 4326,
+    "org_url": "https://gccountymi.maps.arcgis.com",
+    "search_query": "parcel",
+    "service_name_contains": "CountyRealProperty",
     "parcel_id_field": "PARIDSHORT",
     # arcgis field -> Property field (direct upserts).
     "field_map": {
@@ -61,6 +64,9 @@ LAND_BANK_PARCELS = {
     "kind": "arcgis",
     "base_url": "https://services2.arcgis.com/5ckbIY7K9TUKoseK/arcgis/rest/services/Land_Bank_Parcels/FeatureServer",
     "layer_id": 0,
+    "org_url": "https://gccountymi.maps.arcgis.com",
+    "search_query": "land bank parcels",
+    "service_name_contains": "Land_Bank_Parcels",
     "field_map": {},
     "is_active": False,
 }

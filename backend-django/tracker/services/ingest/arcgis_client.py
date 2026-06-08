@@ -14,6 +14,7 @@ It performs no DB work and is unit-testable directly against the live layer.
 
 from __future__ import annotations
 
+import datetime as dt
 import time
 from collections.abc import Iterator
 
@@ -81,22 +82,42 @@ class ArcGisClient:
             raise ArcGisError(f"ArcGIS error: {data['error']}")
         return data
 
-    def _where(self, cursor: int, where_extra: str = "") -> str:
+    def _date_literal(self, cursor: int | str | dt.datetime | dt.date) -> str:
+        if isinstance(cursor, dt.datetime):
+            value = cursor
+        elif isinstance(cursor, dt.date):
+            value = dt.datetime.combine(cursor, dt.time.min)
+        else:
+            text = str(cursor).strip()
+            if not text or text == "0":
+                return ""
+            if text.isdigit():
+                value = dt.datetime.fromtimestamp(int(text) / 1000, tz=dt.UTC)
+            else:
+                value = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if value.tzinfo is not None:
+            value = value.astimezone(dt.UTC).replace(tzinfo=None)
+        return value.strftime("TIMESTAMP '%Y-%m-%d %H:%M:%S'")
+
+    def _where(self, cursor: int | str = 0, where_extra: str = "") -> str:
         if self.edit_date_field:
-            # No resolved source uses an edit-date field yet; implement deliberately
-            # (timestamp formatting + epoch-ms cursor handling) when one appears.
-            raise NotImplementedError(
-                "edit-date diffing not implemented; resolved sources use OBJECTID high-water"
-            )
+            literal = self._date_literal(cursor)
+            base = f"{self.edit_date_field} > {literal}" if literal else "1=1"
+            return f"({base}) AND ({where_extra})" if where_extra else base
         base = f"{self.object_id_field} > {int(cursor or 0)}"
         return f"({base}) AND ({where_extra})" if where_extra else base
+
+    def _order_by(self) -> str:
+        if self.edit_date_field:
+            return f"{self.edit_date_field} ASC, {self.object_id_field} ASC"
+        return f"{self.object_id_field} ASC"
 
     # -- public API -------------------------------------------------------------
     def count_since(self, cursor: int | str = 0, where_extra: str = "") -> int:
         """Cheap pre-check: how many rows are newer than the cursor."""
         data = self._get(
             {
-                "where": self._where(int(cursor or 0), where_extra),
+                "where": self._where(cursor, where_extra),
                 "returnCountOnly": "true",
                 "f": "json",
             }
@@ -116,9 +137,38 @@ class ArcGisClient:
         cursor: starting OBJECTID high-water (exclusive). record_count caps the
         page size (e.g. small for a smoke test). page_limit caps total pages.
         """
-        oid = int(cursor or 0)
         page_size = record_count or self.max_record_count
         pages = 0
+        if self.edit_date_field:
+            offset = 0
+            where = self._where(cursor, where_extra)
+            while True:
+                data = self._get(
+                    {
+                        "where": where,
+                        "outFields": self.out_fields,
+                        "returnGeometry": "true",
+                        "outSR": self.out_sr,
+                        "orderByFields": self._order_by(),
+                        "resultOffset": offset,
+                        "resultRecordCount": page_size,
+                        "f": "json",
+                    }
+                )
+                features = data.get("features", [])
+                if not features:
+                    break
+                for feature in features:
+                    yield feature
+                pages += 1
+                offset += len(features)
+                if page_limit is not None and pages >= page_limit:
+                    break
+                if len(features) < page_size and not data.get("exceededTransferLimit"):
+                    break
+            return
+
+        oid = int(cursor or 0)
         while True:
             data = self._get(
                 {
@@ -126,7 +176,7 @@ class ArcGisClient:
                     "outFields": self.out_fields,
                     "returnGeometry": "true",
                     "outSR": self.out_sr,
-                    "orderByFields": f"{self.object_id_field} ASC",
+                    "orderByFields": self._order_by(),
                     "resultRecordCount": page_size,
                     "f": "json",
                 }

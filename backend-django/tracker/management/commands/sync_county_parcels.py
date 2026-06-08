@@ -24,11 +24,17 @@ class Command(BaseCommand):
         parser.add_argument("--record-count", type=int, default=None, help="page size (small for testing)")
         parser.add_argument("--dry-run", action="store_true", help="pull + map live features, no DB")
         parser.add_argument("--reseed", action="store_true", help="force-refresh DataSource rows from sources.py")
+        parser.add_argument("--resolve-source", action="store_true", help="refresh this DataSource from ArcGIS org search")
         parser.add_argument("--reset-cursor", action="store_true", help="clear last_cursor before syncing")
         parser.add_argument(
             "--recompute-context",
             action="store_true",
-            help="after a successful sync, recompute neighborhood-context scores (full set, for spatial correctness)",
+            help="deprecated: context recompute is now automatic after updated parcels",
+        )
+        parser.add_argument(
+            "--skip-recompute-context",
+            action="store_true",
+            help="skip the automatic neighborhood-context recompute after updated parcels",
         )
 
     def handle(self, *args, **opts):
@@ -40,7 +46,15 @@ class Command(BaseCommand):
         if created:
             self.stdout.write(f"seeded {created} DataSource row(s)")
 
-        source = arcgis_sync.get_active_source(opts["key"])
+        if opts["resolve_source"]:
+            source = arcgis_sync.resolve_and_store_source(opts["key"])
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"resolved {source.key}: {source.base_url}/{source.layer_id}"
+                )
+            )
+        else:
+            source = arcgis_sync.get_active_source(opts["key"])
         if source is None:
             self.stderr.write(self.style.ERROR(f"No active DataSource for key={opts['key']!r}"))
             return
@@ -63,7 +77,7 @@ class Command(BaseCommand):
         if result.errors:
             self.stderr.write(self.style.ERROR("errors: " + "; ".join(result.errors)))
 
-        if opts["recompute_context"] and run.status == "ok" and result.updated:
+        if not opts["skip_recompute_context"] and run.status == "ok" and result.updated:
             # Full recompute: LISA needs each parcel's complete neighborhood, so a
             # changed-only scope would build wrong neighbor sets. Cheap at this scale.
             from tracker.services.context import lisa

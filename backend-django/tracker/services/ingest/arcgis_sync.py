@@ -24,6 +24,7 @@ from tracker.utils.address import build_address_key, build_full_address, extract
 
 from . import sources
 from .arcgis_client import ArcGisClient, ArcGisError
+from .arcgis_resolver import resolve_arcgis_layer
 
 # Attributes the county owns; always refresh on sync.
 ALWAYS_UPDATE = (
@@ -110,6 +111,9 @@ def map_feature(feature: dict, config: dict) -> dict | None:
 
     oid_field = config.get("object_id_field") or "OBJECTID"
     mapped["_oid"] = attrs.get(oid_field)
+    edit_field = config.get("edit_date_field")
+    if edit_field:
+        mapped["_cursor"] = attrs.get(edit_field)
     return mapped
 
 
@@ -133,11 +137,13 @@ def _config_from_source(source: DataSource) -> dict:
 # --- DB layer ------------------------------------------------------------------
 @dataclass
 class SyncResult:
+    expected: int | None = None
     fetched: int = 0
     matched: int = 0
     updated: int = 0
     unmatched: int = 0
     max_oid: int = 0
+    max_cursor: str = ""
     errors: list = field(default_factory=list)
 
 
@@ -172,6 +178,37 @@ def seed_data_sources(force: bool = False):
 
 def get_active_source(key: str = "county_parcels") -> DataSource | None:
     return DataSource.objects.filter(key=key, is_active=True).first()
+
+
+def resolve_and_store_source(key: str = "county_parcels") -> DataSource:
+    seed = sources.seed_for(key)
+    if seed is None:
+        raise ValueError(f"Unknown source key: {key}")
+    resolved = resolve_arcgis_layer(
+        org_url=seed.get("org_url", "https://gccountymi.maps.arcgis.com"),
+        search_query=seed.get("search_query", key),
+        service_name_contains=seed.get("service_name_contains", ""),
+    )
+    defaults = {
+        "label": seed.get("label", resolved.item_title),
+        "kind": "arcgis",
+        "base_url": resolved.base_url,
+        "layer_id": resolved.layer_id,
+        "field_map": resolved.field_map,
+        "edit_date_field": resolved.edit_date_field,
+        "object_id_field": resolved.object_id_field,
+        "is_active": seed.get("is_active", True),
+        "config": {
+            **resolved.config,
+            "org_url": seed.get("org_url", ""),
+            "search_query": seed.get("search_query", ""),
+            "service_name_contains": seed.get("service_name_contains", ""),
+            "resolved_item_title": resolved.item_title,
+            "resolved_layer_name": resolved.layer_name,
+        },
+    }
+    source, _ = DataSource.objects.update_or_create(key=key, defaults=defaults)
+    return source
 
 
 def _apply_mapped(prop: Property, mapped: dict) -> bool:
@@ -236,15 +273,26 @@ def sync_source(
             out_sr=config["out_sr"],
         )
         try:
-            cursor = int(source.last_cursor or 0)
-            for feature in client.iter_features(cursor, page_limit=page_limit, record_count=record_count):
+            cursor = source.last_cursor if config["edit_date_field"] else int(source.last_cursor or 0)
+            result.expected = client.count_since(cursor)
+            if result.expected == 0:
+                result.max_oid = int(source.last_cursor or 0) if not config["edit_date_field"] else 0
+                result.max_cursor = source.last_cursor if config["edit_date_field"] else ""
+            for feature in (
+                []
+                if result.expected == 0
+                else client.iter_features(cursor, page_limit=page_limit, record_count=record_count)
+            ):
                 result.fetched += 1
                 mapped = map_feature(feature, config)
                 if not mapped:
                     continue
                 oid = mapped.pop("_oid", None)
+                edit_cursor = mapped.pop("_cursor", None)
                 if isinstance(oid, int):
                     result.max_oid = max(result.max_oid, oid)
+                if edit_cursor not in (None, ""):
+                    result.max_cursor = str(edit_cursor)
                 parcel_id = mapped["parcel_id"]
 
                 with transaction.atomic():
@@ -273,7 +321,9 @@ def sync_source(
         finally:
             client.close()
 
-        if result.max_oid:
+        if config["edit_date_field"] and result.max_cursor:
+            source.last_cursor = result.max_cursor
+        elif result.max_oid:
             source.last_cursor = str(result.max_oid)
         source.last_synced_at = timezone.now()
         source.save(update_fields=["last_cursor", "last_synced_at", "updated_at"])
@@ -290,6 +340,12 @@ def sync_source(
     run.updated = result.updated
     run.unmatched = result.unmatched
     run.finished_at = timezone.now()
-    run.detail = {"errors": result.errors, "max_oid": result.max_oid, "policy": policy}
+    run.detail = {
+        "errors": result.errors,
+        "max_oid": result.max_oid,
+        "max_cursor": result.max_cursor,
+        "expected": result.expected,
+        "policy": policy,
+    }
     run.save()
     return run, result

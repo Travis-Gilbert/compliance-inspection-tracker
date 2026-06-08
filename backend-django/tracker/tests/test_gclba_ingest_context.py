@@ -295,6 +295,39 @@ class GclbaIngestContextTests(TestCase):
         self.assertEqual(result["computed"], 4)
         self.assertEqual(NeighborhoodContextScore.objects.count(), 4)
 
+    def test_compute_context_scores_faceblock_groups_by_street(self):
+        # Three parcels on the same street + one on a unique street. faceblock
+        # parses the street name from Property.address, so same-street parcels
+        # become neighbors and the unique-street parcel gets an empty set.
+        rows = [
+            ("100 Mason St", "41-00-000-010", "CFD", -83.700, 43.010),
+            ("104 Mason St", "41-00-000-011", "NCFD", -83.701, 43.011),
+            ("108 Mason St", "41-00-000-012", "", -83.702, 43.012),
+            ("5 Solitary Ave", "41-00-000-013", "NCFD", -83.720, 43.030),
+        ]
+        for address, parcel_id, status, lon, lat in rows:
+            Property.objects.create(
+                address=address,
+                parcel_id=parcel_id,
+                latitude=lat,
+                longitude=lon,
+                forfeiture_status=status,
+            )
+
+        result = lisa.compute_and_store(
+            signal="tax_distress",
+            neighborhood_def="faceblock",
+            k=8,
+            seed=7,
+        )
+
+        self.assertEqual(result["computed"], 4)
+        self.assertEqual(result["neighborhood_def"], "faceblock")
+        solitary = NeighborhoodContextScore.objects.get(parcel_id="41-00-000-013")
+        self.assertEqual(solitary.neighbor_parcel_ids, [])
+        mason = NeighborhoodContextScore.objects.get(parcel_id="41-00-000-010")
+        self.assertCountEqual(mason.neighbor_parcel_ids, ["41-00-000-011", "41-00-000-012"])
+
     def test_sync_county_parcels_dry_run_maps_live_shape_without_db_writes(self):
         out = StringIO()
         feature = {

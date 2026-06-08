@@ -103,11 +103,20 @@ def compute_and_store(
     if len(ids) < 3:
         return {"computed": 0, "reason": "need >=3 parcels with this signal", "available": len(ids)}
 
+    by_id = {p.parcel_id: p for p in parcels}
     geojson = None
     if neighborhood_def in ("queen", "rook"):
-        by_id = {p.parcel_id: p for p in parcels}
         geojson = [getattr(by_id.get(pid), "boundary_geojson", None) for pid in ids]
-    weights = build_weights(coords, definition=neighborhood_def, geojson=geojson, k=k)
+    street_names = None
+    if neighborhood_def == "faceblock":
+        street_names = [getattr(by_id.get(pid), "address", "") for pid in ids]
+    weights = build_weights(
+        coords,
+        definition=neighborhood_def,
+        geojson=geojson,
+        street_names=street_names,
+        k=k,
+    )
     stats = local_stats(values, weights, significance=significance, seed=seed)
 
     prop_by_id = {p.parcel_id: p for p in parcels}

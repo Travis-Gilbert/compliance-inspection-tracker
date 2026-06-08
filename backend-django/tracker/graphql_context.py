@@ -105,7 +105,7 @@ class ContextQuery:
     @strawberry.field
     def context_scores(
         self,
-        neighborhood_def: str = "knn8",
+        neighborhood_def: str = "faceblock",
         signal: str = "tax_distress",
         parcel_ids: list[str] | None = None,
         limit: int = 2000,
@@ -121,7 +121,7 @@ class ContextQuery:
     def context_score(
         self,
         parcel_id: str,
-        neighborhood_def: str = "knn8",
+        neighborhood_def: str = "faceblock",
         signal: str = "tax_distress",
     ) -> NeighborhoodContextScoreType | None:
         from tracker.models import NeighborhoodContextScore

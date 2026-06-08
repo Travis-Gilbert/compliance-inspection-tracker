@@ -59,7 +59,19 @@ def compute_composite(
     if len(ids) < 3:
         return {"computed": 0, "reason": "need >=3 parcels with >=1 signal", "available": len(ids)}
 
-    weights_obj = build_weights(np.asarray(coords, dtype=float), definition=neighborhood_def, k=k)
+    geojson = None
+    if neighborhood_def in ("queen", "rook"):
+        geojson = [getattr(prop_by_id.get(pid), "boundary_geojson", None) for pid in ids]
+    street_names = None
+    if neighborhood_def == "faceblock":
+        street_names = [getattr(prop_by_id.get(pid), "address", "") for pid in ids]
+    weights_obj = build_weights(
+        np.asarray(coords, dtype=float),
+        definition=neighborhood_def,
+        geojson=geojson,
+        street_names=street_names,
+        k=k,
+    )
     stats = local_stats(np.asarray(values, dtype=float), weights_obj, significance=significance, seed=seed)
     written = 0
     for pos, pid in enumerate(ids):

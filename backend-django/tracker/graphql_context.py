@@ -11,6 +11,7 @@ annotations), so Strawberry resolves them directly.
 """
 
 import datetime as dt
+import math
 
 import strawberry
 from strawberry.scalars import JSON
@@ -71,19 +72,37 @@ class WeeklyReportType:
     html: str
 
 
+def _finite(value: float | None) -> float | None:
+    """Collapse NaN/inf to None.
+
+    GraphQL Float cannot represent NaN or infinity; a single non-finite value
+    poisons the whole response with a "Float cannot represent non numeric
+    value: nan" error, which flips the frontend into its no-data state. Isolated
+    parcels and zero-variance neighborhoods can produce NaN in the LISA stats,
+    so guard every float field here. All of these fields are already nullable on
+    the client.
+    """
+    if value is None:
+        return None
+    try:
+        return value if math.isfinite(value) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _score_type(score) -> NeighborhoodContextScoreType:
     return NeighborhoodContextScoreType(
         parcel_id=score.parcel_id,
         neighborhood_def=score.neighborhood_def,
         signal=score.signal,
-        parcel_value=score.parcel_value,
-        local_mean=score.local_mean,
-        local_std=score.local_std,
-        z_score=score.z_score,
-        spatial_lag=score.spatial_lag,
+        parcel_value=_finite(score.parcel_value),
+        local_mean=_finite(score.local_mean),
+        local_std=_finite(score.local_std),
+        z_score=_finite(score.z_score),
+        spatial_lag=_finite(score.spatial_lag),
         moran_cluster=score.moran_cluster,
-        moran_p=score.moran_p,
-        gi_star=score.gi_star,
+        moran_p=_finite(score.moran_p),
+        gi_star=_finite(score.gi_star),
         neighbor_parcel_ids=score.neighbor_parcel_ids or [],
     )
 

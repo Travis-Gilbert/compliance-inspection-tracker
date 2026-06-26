@@ -127,6 +127,13 @@ IMAGERY_CONCURRENCY = env.int("IMAGERY_CONCURRENCY", default=6)
 DETECTION_WORKERS = env.int("DETECTION_WORKERS", default=4)
 PIPELINE_BATCH_SIZE = env.int("PIPELINE_BATCH_SIZE", default=100)
 
+# Twenty CRM projection. These are backend-only operational settings; never
+# expose TWENTY_API_KEY or TWENTY_WEBHOOK_SECRET through frontend env vars.
+TWENTY_BASE_URL = env("TWENTY_BASE_URL", default="")
+TWENTY_FRONTEND_URL = env("TWENTY_FRONTEND_URL", default=TWENTY_BASE_URL)
+TWENTY_API_KEY = env("TWENTY_API_KEY", default="")
+TWENTY_WEBHOOK_SECRET = env("TWENTY_WEBHOOK_SECRET", default="")
+
 # GraphQL is the org-facing atlas integration surface. Django Ninja remains
 # available for the standalone tracker frontend and CSV power-tool flows.
 STRAWBERRY_DJANGO = {

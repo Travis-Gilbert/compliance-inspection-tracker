@@ -888,3 +888,89 @@ class CaseEvent(models.Model):
 
     def __str__(self):
         return f"{self.transition or 'event'} [{self.category_tag}] ({self.occurred_at:%Y-%m-%d})"
+
+
+class TwentySyncRecord(models.Model):
+    """Local projection state for records mirrored into Twenty.
+
+    Django/PostGIS remains canonical. This table only remembers the external
+    Twenty record created for a Django-backed object so future syncs can update
+    instead of duplicating records.
+    """
+
+    tenant_id = models.CharField(max_length=50, default="gclba", db_index=True)
+    object_name = models.CharField(max_length=80, db_index=True)
+    external_key = models.CharField(max_length=160, db_index=True)
+    twenty_record_id = models.CharField(max_length=120, default="", blank=True, db_index=True)
+    twenty_url = models.URLField(default="", blank=True)
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="twenty_sync_records",
+    )
+    communication = models.ForeignKey(
+        Communication,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="twenty_sync_records",
+    )
+    action_item = models.ForeignKey(
+        ActionItem,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="twenty_sync_records",
+    )
+    payload_hash = models.CharField(max_length=64, default="", blank=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    last_webhook_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(default="", blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["object_name", "external_key"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "object_name", "external_key"],
+                name="unique_twenty_sync_record",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "object_name"]),
+            models.Index(fields=["twenty_record_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.object_name}:{self.external_key}"
+
+
+class TwentyWebhookEvent(models.Model):
+    """Audited inbound webhook from Twenty.
+
+    The first operational slice records events and associates them to sync
+    records. Canonical Django writes from Twenty should stay explicit and
+    field-scoped as follow-up work.
+    """
+
+    event = models.CharField(max_length=120, db_index=True)
+    object_name = models.CharField(max_length=80, default="", blank=True, db_index=True)
+    twenty_record_id = models.CharField(max_length=120, default="", blank=True, db_index=True)
+    payload = models.JSONField(default=dict, blank=True)
+    processed = models.BooleanField(default=False, db_index=True)
+    error = models.TextField(default="", blank=True)
+    received_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-received_at"]
+        indexes = [
+            models.Index(fields=["event", "-received_at"]),
+            models.Index(fields=["object_name", "twenty_record_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event} {self.twenty_record_id or 'unknown'}"

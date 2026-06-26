@@ -941,8 +941,8 @@ class TwentySyncRecord(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=["tenant_id", "object_name"]),
-            models.Index(fields=["twenty_record_id"]),
+            models.Index(fields=["tenant_id", "object_name"], name="tracker_twe_tenant__f9fb20_idx"),
+            models.Index(fields=["twenty_record_id"], name="tracker_twe_twenty__42c188_idx"),
         ]
 
     def __str__(self):
@@ -968,8 +968,8 @@ class TwentyWebhookEvent(models.Model):
     class Meta:
         ordering = ["-received_at"]
         indexes = [
-            models.Index(fields=["event", "-received_at"]),
-            models.Index(fields=["object_name", "twenty_record_id"]),
+            models.Index(fields=["event", "-received_at"], name="tracker_twe_event_beb689_idx"),
+            models.Index(fields=["object_name", "twenty_record_id"], name="tracker_twe_object__498d68_idx"),
         ]
 
     def __str__(self):

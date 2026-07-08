@@ -676,7 +676,12 @@ class Query:
         for conflict in conflict_rows:
             if conflict.status == "open" and conflict.parcel_id not in first_open_conflict_by_parcel:
                 first_open_conflict_by_parcel[conflict.parcel_id] = conflict
-        coverage = coverage_summary(Property.objects.filter(pk__in=[prop.pk for prop in property_rows]))
+        coverage_scope = (
+            Property.objects.filter(parcel_id=parcel_id)
+            if parcel_id
+            else None
+        )
+        coverage = coverage_summary(coverage_scope)
         return PropertyIntelligencePayload(
             coverage=PropertyIntelligenceCoverage(
                 tracked_property_count=coverage.tracked_property_count,

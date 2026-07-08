@@ -20,6 +20,15 @@ import numpy as np
 
 SIGNAL_KEYS = ("tax_distress", "sale_recency", "compliance", "assessed_value", "value_trajectory")
 
+# +1 means higher is healthier; -1 means higher is worse.
+SIGNAL_ORIENTATION = {
+    "assessed_value": 1.0,
+    "value_trajectory": 1.0,
+    "sale_recency": -1.0,
+    "tax_distress": -1.0,
+    "compliance": -1.0,
+}
+
 # Michigan forfeiture/foreclosure distress, ordinal and tunable. Empty = none.
 FORFEITURE_DISTRESS_SCORES = {
     "": 0.0,

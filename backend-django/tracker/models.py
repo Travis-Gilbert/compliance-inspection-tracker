@@ -200,6 +200,10 @@ class Property(models.Model):
     # Parcel polygon as GeoJSON (no PostGIS column; geopandas rebuilds geometry from this).
     boundary_geojson = models.JSONField(null=True, blank=True)
 
+    # Source-record dossier from the private property-intelligence index.
+    # This is deliberately scrubbed of buyer/contact/private notes before import.
+    sources = models.JSONField(default=list, blank=True)
+
     # Import tracking
     import_batch = models.CharField(max_length=100, default="")
 
@@ -714,6 +718,106 @@ class NeighborhoodContextScore(models.Model):
 
     def __str__(self):
         return f"{self.parcel_id} {self.signal}/{self.neighborhood_def}: {self.moran_cluster}"
+
+
+SOURCE_CONFLICT_KIND_CHOICES = [
+    ("owner_mismatch", "Owner mismatch"),
+    ("reverse_mismatch", "Reverse mismatch"),
+    ("pid_orphan", "Parcel orphan"),
+    ("condition_regression", "Condition regression"),
+    ("value_disagreement", "Value disagreement"),
+]
+
+SOURCE_CONFLICT_SEVERITY_CHOICES = [
+    ("watch", "Watch"),
+    ("review", "Review"),
+    ("high", "High"),
+]
+
+
+class SourceConflict(models.Model):
+    """A cross-source property disagreement produced by the private index."""
+
+    STATUS_CHOICES = [
+        ("open", "Open"),
+        ("resolved", "Resolved"),
+        ("dismissed", "Dismissed"),
+    ]
+
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="source_conflicts",
+    )
+    parcel_id = models.CharField(max_length=20, db_index=True)
+    external_key = models.CharField(max_length=160, default="", blank=True, db_index=True)
+    source = models.CharField(max_length=80, default="gclba-index", db_index=True)
+    kind = models.CharField(max_length=40, choices=SOURCE_CONFLICT_KIND_CHOICES, db_index=True)
+    severity = models.CharField(max_length=20, choices=SOURCE_CONFLICT_SEVERITY_CHOICES, default="review", db_index=True)
+    title = models.CharField(max_length=240)
+    plain_language = models.TextField(default="", blank=True)
+    evidence = models.JSONField(default=list, blank=True)
+    observed_at = models.DateField(default=timezone.localdate, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="open", db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-observed_at", "parcel_id", "kind"]
+        indexes = [
+            models.Index(fields=["status", "kind"]),
+            models.Index(fields=["source", "external_key"]),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} {self.parcel_id} ({self.status})"
+
+
+class CandidateProperty(models.Model):
+    """A parcel/home candidate that should enter the compliance work queue."""
+
+    STATUS_CHOICES = [
+        ("queued", "Queued"),
+        ("imported", "Imported"),
+        ("dismissed", "Dismissed"),
+    ]
+
+    property = models.ForeignKey(
+        Property,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="candidate_properties",
+    )
+    source_conflict = models.ForeignKey(
+        SourceConflict,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="candidate_properties",
+    )
+    parcel_id = models.CharField(max_length=20, db_index=True)
+    external_key = models.CharField(max_length=160, default="", blank=True, db_index=True)
+    address = models.TextField(default="", blank=True)
+    reason = models.TextField()
+    evidence = models.TextField(default="", blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="queued", db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["status", "parcel_id", "id"]
+        indexes = [
+            models.Index(fields=["status", "parcel_id"]),
+            models.Index(fields=["external_key"]),
+        ]
+
+    def __str__(self):
+        return f"{self.parcel_id} ({self.status})"
 
 
 # Five-category activity tagging (Freeman's duty areas). The percentages are the

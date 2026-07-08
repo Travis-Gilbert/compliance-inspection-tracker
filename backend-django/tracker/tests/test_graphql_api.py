@@ -8,7 +8,14 @@ from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
-from tracker.models import ActionItem, Communication, Document, Property
+from tracker.models import (
+    ActionItem,
+    CandidateProperty,
+    Communication,
+    Document,
+    Property,
+    SourceConflict,
+)
 from tracker.services.compliance_timing import ACTION_ATTEMPT_1
 
 
@@ -340,3 +347,173 @@ class GraphqlApiTests(TestCase):
         self.assertEqual(item["priority"], 77)
         self.assertEqual(item["reasons"], ["Tax status docs need verification."])
         self.assertEqual(item["source"], "staff")
+
+    def test_imported_property_intelligence_exposes_conflicts_without_buyer_pii(self):
+        payload = {
+            "parcels": [
+                {
+                    "dossier": {
+                        "parcelId": "41-06-538-018",
+                        "address": "323 Mason St",
+                        "canonical": {
+                            "program": "Homeownership transfer",
+                            "structure": "home",
+                        },
+                        "records": [
+                            {
+                                "sourceId": "site_control_export",
+                                "sourceRecordId": "portal:41-06-538-018",
+                                "observedAt": "2026-07-07",
+                                "facts": [
+                                    {"label": "Parcel", "value": "41-06-538-018"},
+                                    {"label": "Address", "value": "323 Mason St"},
+                                    {"label": "Buyer name", "value": "Private Buyer"},
+                                    {"label": "Email", "value": "private@example.com"},
+                                    {"label": "Phone", "value": "555-0100"},
+                                    {"label": "ReviewedBy", "value": "staff"},
+                                ],
+                            },
+                            {
+                                "sourceId": "county_arcgis",
+                                "sourceRecordId": "county:41-06-538-018",
+                                "observedAt": "2026-07-07",
+                                "facts": [
+                                    {"label": "Parcel", "value": "41-06-538-018"},
+                                    {"label": "Owner", "value": "County owner value"},
+                                ],
+                            },
+                        ],
+                    }
+                }
+            ],
+            "conflicts": [
+                {
+                    "id": "conflict-owner-41-06-538-018",
+                    "parcelId": "41-06-538-018",
+                    "kind": "owner_mismatch",
+                    "severity": "high",
+                    "title": "Portal says land bank owned, county says private owner",
+                    "plainLanguage": "This looks like a sold home missing from the compliance list.",
+                    "evidence": [
+                        "Portal export labels the parcel as GCLBA.",
+                        "County GIS owner field no longer matches the land bank label.",
+                    ],
+                    "observedAt": "2026-07-07",
+                }
+            ],
+            "candidates": [
+                {
+                    "id": "candidate-41-06-538-018",
+                    "sourceConflictId": "conflict-owner-41-06-538-018",
+                    "parcelId": "41-06-538-018",
+                    "address": "323 Mason St",
+                    "reason": "Sold or disposition home likely missing from compliance list",
+                    "evidence": "owner_mismatch",
+                }
+            ],
+        }
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as handle:
+            json.dump(payload, handle)
+            handle.flush()
+            call_command("import_index_dossiers", handle.name, stdout=StringIO())
+
+        prop = Property.objects.get(parcel_id="41-06-538-018")
+        labels = {
+            fact["label"]
+            for record in prop.sources
+            for fact in record["facts"]
+        }
+        self.assertEqual(prop.program, "Homeownership transfer")
+        self.assertEqual(prop.land_use, "home")
+        self.assertIn("Parcel", labels)
+        self.assertIn("Owner", labels)
+        self.assertNotIn("Buyer name", labels)
+        self.assertNotIn("Email", labels)
+        self.assertNotIn("Phone", labels)
+        self.assertNotIn("ReviewedBy", labels)
+        self.assertEqual(SourceConflict.objects.count(), 1)
+        self.assertEqual(CandidateProperty.objects.count(), 1)
+
+        response = graphql_query(
+            self.client,
+            """
+            query {
+              propertyIntelligence {
+                coverage {
+                  parcelsIndexed
+                  homeCount
+                  activeProgramCount
+                  sourceCount
+                  openConflictCount
+                  candidateCount
+                }
+                conflicts {
+                  parcelId
+                  kind
+                  severity
+                  title
+                  plainLanguage
+                  evidence
+                  observedAt
+                  status
+                }
+                candidateProperties {
+                  parcelId
+                  address
+                  reason
+                  evidence
+                  status
+                }
+                parcels {
+                  coverageCount
+                  conflict {
+                    kind
+                    title
+                  }
+                  dossier {
+                    parcelId
+                    address
+                    records {
+                      sourceId
+                      sourceName
+                      sourceRecordId
+                      observedAt
+                      facts {
+                        label
+                        value
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            """,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        graph = response.json()
+        self.assertNotIn("errors", graph)
+        intelligence = graph["data"]["propertyIntelligence"]
+        self.assertEqual(
+            intelligence["coverage"],
+            {
+                "parcelsIndexed": 1,
+                "homeCount": 1,
+                "activeProgramCount": 1,
+                "sourceCount": 2,
+                "openConflictCount": 1,
+                "candidateCount": 1,
+            },
+        )
+        self.assertEqual(intelligence["conflicts"][0]["kind"], "owner_mismatch")
+        self.assertEqual(intelligence["conflicts"][0]["severity"], "high")
+        self.assertEqual(intelligence["candidateProperties"][0]["parcelId"], "41-06-538-018")
+        self.assertEqual(intelligence["parcels"][0]["coverageCount"], 2)
+        returned_labels = {
+            fact["label"]
+            for record in intelligence["parcels"][0]["dossier"]["records"]
+            for fact in record["facts"]
+        }
+        self.assertNotIn("Buyer name", returned_labels)
+        self.assertNotIn("Email", returned_labels)

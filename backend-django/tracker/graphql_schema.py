@@ -14,13 +14,16 @@ from tracker.graphql_context import ComplianceQuery, ContextQuery
 from tracker.models import (
     ActionItem,
     Buyer,
+    CandidateProperty,
     Communication,
     Document,
     EmailTemplate,
     Program,
     Property,
     PropertyPhoto,
+    SourceConflict,
 )
+from tracker.services.property_intelligence import coverage_summary, source_name
 from tracker.services.workflow import (
     apply_communication_rollups,
     build_action_queue,
@@ -348,6 +351,80 @@ class DeploymentTopology:
     public_boundary: str
 
 
+@strawberry.type
+class PropertySourceFact:
+    label: str
+    value: str
+
+
+@strawberry.type
+class PropertySourceRecord:
+    source_id: str
+    source_name: str
+    source_record_id: str
+    observed_at: str
+    facts: list[PropertySourceFact]
+
+
+@strawberry.type
+class PropertyDossier:
+    parcel_id: str
+    address: str
+    records: list[PropertySourceRecord]
+
+
+@strawberry.type
+class SourceConflictType:
+    id: int
+    property_id: int | None
+    parcel_id: str
+    kind: str
+    severity: str
+    title: str
+    plain_language: str
+    evidence: list[str]
+    observed_at: date
+    status: str
+
+
+@strawberry.type
+class CandidatePropertyType:
+    id: int
+    property_id: int | None
+    source_conflict_id: int | None
+    parcel_id: str
+    address: str
+    reason: str
+    evidence: str
+    status: str
+
+
+@strawberry.type
+class PropertyIntelligenceParcel:
+    dossier: PropertyDossier
+    coverage_count: int
+    conflict: SourceConflictType | None
+
+
+@strawberry.type
+class PropertyIntelligenceCoverage:
+    tracked_property_count: int
+    parcels_indexed: int
+    home_count: int
+    active_program_count: int
+    source_count: int
+    open_conflict_count: int
+    candidate_count: int
+
+
+@strawberry.type
+class PropertyIntelligencePayload:
+    coverage: PropertyIntelligenceCoverage
+    conflicts: list[SourceConflictType]
+    candidate_properties: list[CandidatePropertyType]
+    parcels: list[PropertyIntelligenceParcel]
+
+
 @strawberry.input
 class PropertyPatchInput:
     id: int
@@ -448,6 +525,77 @@ def _workflow_preview(payload: dict) -> WorkflowTemplatePreview:
     )
 
 
+def _source_record(payload: dict) -> PropertySourceRecord:
+    facts = [
+        PropertySourceFact(
+            label=str(fact.get("label") or ""),
+            value=str(fact.get("value") or ""),
+        )
+        for fact in payload.get("facts", [])
+        if isinstance(fact, dict)
+    ]
+    source_id = str(payload.get("sourceId") or "")
+    return PropertySourceRecord(
+        source_id=source_id,
+        source_name=source_name(source_id),
+        source_record_id=str(payload.get("sourceRecordId") or ""),
+        observed_at=str(payload.get("observedAt") or ""),
+        facts=facts,
+    )
+
+
+def _source_conflict(root: SourceConflict) -> SourceConflictType:
+    return SourceConflictType(
+        id=root.id,
+        property_id=root.property_id,
+        parcel_id=root.parcel_id,
+        kind=root.kind,
+        severity=root.severity,
+        title=root.title,
+        plain_language=root.plain_language,
+        evidence=[str(item) for item in root.evidence if isinstance(item, str)],
+        observed_at=root.observed_at,
+        status=root.status,
+    )
+
+
+def _candidate_property(root: CandidateProperty) -> CandidatePropertyType:
+    return CandidatePropertyType(
+        id=root.id,
+        property_id=root.property_id,
+        source_conflict_id=root.source_conflict_id,
+        parcel_id=root.parcel_id,
+        address=root.address,
+        reason=root.reason,
+        evidence=root.evidence,
+        status=root.status,
+    )
+
+
+def _property_intelligence_parcel(
+    root: Property,
+    conflict_by_parcel: dict[str, SourceConflict],
+) -> PropertyIntelligenceParcel:
+    records = [
+        _source_record(record)
+        for record in root.sources
+        if isinstance(root.sources, list) and isinstance(record, dict)
+    ]
+    return PropertyIntelligenceParcel(
+        dossier=PropertyDossier(
+            parcel_id=root.parcel_id,
+            address=root.address,
+            records=records,
+        ),
+        coverage_count=len(records),
+        conflict=(
+            _source_conflict(conflict_by_parcel[root.parcel_id])
+            if root.parcel_id in conflict_by_parcel
+            else None
+        ),
+    )
+
+
 @strawberry.type
 class Query:
     @strawberry.field
@@ -497,6 +645,95 @@ class Query:
         safe_limit = max(1, min(limit, 250))
         safe_offset = max(0, offset)
         return list(qs[safe_offset:safe_offset + safe_limit])
+
+    @strawberry.field
+    def property_intelligence(
+        self,
+        parcel_id: str | None = None,
+        limit: int = 5000,
+    ) -> PropertyIntelligencePayload:
+        safe_limit = max(1, min(limit, 5000))
+        properties = Property.objects.order_by("parcel_id", "id")
+        if parcel_id:
+            properties = properties.filter(parcel_id=parcel_id)
+        property_rows = list(properties[:safe_limit])
+        conflict_qs = SourceConflict.objects.select_related("property").order_by(
+            "-observed_at",
+            "parcel_id",
+            "kind",
+        )
+        if parcel_id:
+            conflict_qs = conflict_qs.filter(parcel_id=parcel_id)
+        conflict_rows = list(conflict_qs[:safe_limit])
+        candidate_qs = CandidateProperty.objects.select_related(
+            "property",
+            "source_conflict",
+        ).order_by("status", "parcel_id", "id")
+        if parcel_id:
+            candidate_qs = candidate_qs.filter(parcel_id=parcel_id)
+        candidate_rows = list(candidate_qs[:safe_limit])
+        first_open_conflict_by_parcel: dict[str, SourceConflict] = {}
+        for conflict in conflict_rows:
+            if conflict.status == "open" and conflict.parcel_id not in first_open_conflict_by_parcel:
+                first_open_conflict_by_parcel[conflict.parcel_id] = conflict
+        coverage = coverage_summary(Property.objects.filter(pk__in=[prop.pk for prop in property_rows]))
+        return PropertyIntelligencePayload(
+            coverage=PropertyIntelligenceCoverage(
+                tracked_property_count=coverage.tracked_property_count,
+                parcels_indexed=coverage.parcels_indexed,
+                home_count=coverage.home_count,
+                active_program_count=coverage.active_program_count,
+                source_count=coverage.source_count,
+                open_conflict_count=coverage.open_conflict_count,
+                candidate_count=coverage.candidate_count,
+            ),
+            conflicts=[_source_conflict(conflict) for conflict in conflict_rows],
+            candidate_properties=[_candidate_property(candidate) for candidate in candidate_rows],
+            parcels=[
+                _property_intelligence_parcel(prop, first_open_conflict_by_parcel)
+                for prop in property_rows
+                if isinstance(prop.sources, list) and len(prop.sources) > 0
+            ],
+        )
+
+    @strawberry.field
+    def source_conflicts(
+        self,
+        status: str | None = "open",
+        kind: str | None = None,
+        parcel_id: str | None = None,
+        limit: int = 250,
+    ) -> list[SourceConflictType]:
+        qs = SourceConflict.objects.select_related("property").order_by(
+            "-observed_at",
+            "parcel_id",
+            "kind",
+        )
+        if status:
+            qs = qs.filter(status=status)
+        if kind:
+            qs = qs.filter(kind=kind)
+        if parcel_id:
+            qs = qs.filter(parcel_id=parcel_id)
+        return [_source_conflict(conflict) for conflict in qs[: max(1, min(limit, 500))]]
+
+    @strawberry.field
+    def candidate_properties(
+        self,
+        status: str | None = "queued",
+        parcel_id: str | None = None,
+        limit: int = 250,
+    ) -> list[CandidatePropertyType]:
+        qs = CandidateProperty.objects.select_related("property", "source_conflict").order_by(
+            "status",
+            "parcel_id",
+            "id",
+        )
+        if status:
+            qs = qs.filter(status=status)
+        if parcel_id:
+            qs = qs.filter(parcel_id=parcel_id)
+        return [_candidate_property(candidate) for candidate in qs[: max(1, min(limit, 500))]]
 
     @strawberry.field
     def communications(self, property_id: int) -> list[CommunicationType]:

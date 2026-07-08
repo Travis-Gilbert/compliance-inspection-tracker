@@ -133,6 +133,9 @@ TWENTY_BASE_URL = env("TWENTY_BASE_URL", default="")
 TWENTY_FRONTEND_URL = env("TWENTY_FRONTEND_URL", default=TWENTY_BASE_URL)
 TWENTY_API_KEY = env("TWENTY_API_KEY", default="")
 TWENTY_WEBHOOK_SECRET = env("TWENTY_WEBHOOK_SECRET", default="")
+TWENTY_RATE_LIMIT_PER_MINUTE = env.int("TWENTY_RATE_LIMIT_PER_MINUTE", default=90)
+GCLBA_MAP_URL = env("GCLBA_MAP_URL", default="https://www.gclbamaps.org/gclba/context")
+GCLBA_BACKEND_PUBLIC_URL = env("GCLBA_BACKEND_PUBLIC_URL", default="")
 
 # GraphQL is the org-facing atlas integration surface. Django Ninja remains
 # available for the standalone tracker frontend and CSV power-tool flows.

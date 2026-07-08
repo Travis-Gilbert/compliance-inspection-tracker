@@ -17,7 +17,13 @@ import datetime as dt
 import html
 from dataclasses import dataclass, field
 
+from django.utils import timezone
+
 from tracker.models import CATEGORY_TAG_CHOICES, CATEGORY_TARGET_PCT
+from tracker.services.property_intelligence import (
+    PropertyIntelligenceReportSnapshot,
+    intelligence_report_snapshot,
+)
 
 CATEGORY_LABELS = dict(CATEGORY_TAG_CHOICES)
 CATEGORY_ORDER = [tag for tag, _ in CATEGORY_TAG_CHOICES]
@@ -30,6 +36,7 @@ class WeeklyReportData:
     prepared_by: str
     categories: dict = field(default_factory=dict)  # tag -> {count, actual_pct, target_pct, items}
     totals: dict = field(default_factory=dict)
+    intelligence: PropertyIntelligenceReportSnapshot | None = None
 
 
 def week_bounds(reference: dt.date | None = None) -> tuple[dt.date, dt.date]:
@@ -72,7 +79,15 @@ def _obs_item(obs) -> dict:
     }
 
 
-def assemble(start, end, prepared_by, events, observations) -> WeeklyReportData:
+def assemble(
+    start,
+    end,
+    prepared_by,
+    events,
+    observations,
+    *,
+    intelligence: PropertyIntelligenceReportSnapshot | None = None,
+) -> WeeklyReportData:
     """Pure: bucket events + observations by category_tag into report data."""
     cats: dict = {tag: {"items": []} for tag in CATEGORY_ORDER}
     for event in events:
@@ -92,6 +107,7 @@ def assemble(start, end, prepared_by, events, observations) -> WeeklyReportData:
         prepared_by=prepared_by,
         categories=cats,
         totals={"events": len(events), "observations": len(observations), "activities": total},
+        intelligence=intelligence,
     )
 
 
@@ -120,6 +136,14 @@ def render_text(data: WeeklyReportData) -> str:
         f"Prepared by {data.prepared_by}",
         "",
     ]
+    if data.intelligence is not None:
+        lines.extend(
+            [
+                data.intelligence.coverage_line,
+                data.intelligence.discoveries_line,
+                "",
+            ]
+        )
     for tag in CATEGORY_ORDER:
         bucket = data.categories.get(tag, {"count": 0, "actual_pct": 0.0, "target_pct": CATEGORY_TARGET_PCT.get(tag, 0), "items": []})
         lines.append(f"{CATEGORY_LABELS[tag]}  (target {bucket['target_pct']}%, actual {bucket['actual_pct']}%)")
@@ -146,6 +170,9 @@ def render_html(data: WeeklyReportData) -> str:
         "<h1>Weekly Compliance Report</h1>",
         f"<p class='meta'>Week of {data.start.isoformat()} to {data.end.isoformat()}<br>Prepared by {esc(data.prepared_by)}</p>",
     ]
+    if data.intelligence is not None:
+        parts.append("<h2>Property Intelligence</h2>")
+        parts.append(f"<p>{esc(data.intelligence.coverage_line)}<br>{esc(data.intelligence.discoveries_line)}</p>")
     for tag in CATEGORY_ORDER:
         bucket = data.categories.get(tag, {"count": 0, "actual_pct": 0.0, "target_pct": CATEGORY_TARGET_PCT.get(tag, 0), "items": []})
         parts.append(
@@ -157,7 +184,7 @@ def render_html(data: WeeklyReportData) -> str:
             parts.append("<ul>")
             for item in bucket["items"]:
                 pid = f"<span class='pid'>{esc(item['parcel_id'])}</span> " if item["parcel_id"] else ""
-                parts.append(f"<li>{esc(item['date'])} &mdash; {pid}{esc(item['label'])}</li>")
+                parts.append(f"<li>{esc(item['date'])} - {pid}{esc(item['label'])}</li>")
             parts.append("</ul>")
     parts.append(f"<p class='summary'>{esc(_summary(data))}</p>")
     parts.append("</body></html>")
@@ -177,15 +204,22 @@ def gather_week(start: dt.date, end: dt.date, *, prepared_by: str = "Travis Gilb
     """DB: collect the week's tagged CaseEvent + ComplianceObservation activity."""
     from tracker.models import CaseEvent, ComplianceObservation
 
-    start_dt = dt.datetime.combine(start, dt.time.min)
-    end_dt = dt.datetime.combine(end, dt.time.max)
+    start_dt = timezone.make_aware(dt.datetime.combine(start, dt.time.min))
+    end_dt = timezone.make_aware(dt.datetime.combine(end, dt.time.max))
     events = list(
         CaseEvent.objects.filter(occurred_at__range=(start_dt, end_dt)).select_related("case")
     )
     observations = list(
         ComplianceObservation.objects.filter(observed_at__range=(start_dt, end_dt)).select_related("case")
     )
-    return assemble(start, end, prepared_by, events, observations)
+    return assemble(
+        start,
+        end,
+        prepared_by,
+        events,
+        observations,
+        intelligence=intelligence_report_snapshot(start=start, end=end),
+    )
 
 
 def build_report(reference: dt.date | None = None, *, prepared_by: str = "Travis Gilbert") -> dict:

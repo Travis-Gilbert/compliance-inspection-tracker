@@ -61,7 +61,45 @@ a Strawberry mutation can be added if you prefer GraphQL, but is not required).
   complianceCases(status, program) / complianceCase(parcelId) / caseEvents(parcelId);
   weeklyReport(weekOf). Codex Phase 3 viz can swap its synthetic fixture for live contextScores.
 
+## Done: Property intelligence D7 import + GraphQL read model
+- `Property.sources` stores scrubbed source-record dossiers from the private index.
+- `SourceConflict` is the conflict ledger table; `CandidateProperty` is the compliance
+  review queue for homes discovered from conflicts such as `owner_mismatch`.
+- `import_index_dossiers <path.json>` imports gclba-index JSON, strips buyer/contact/private
+  fields from source facts, and upserts properties, conflicts, and candidates.
+- GraphQL now exposes `propertyIntelligence`, `sourceConflicts`, and `candidateProperties`
+  for the GCLBA frontend. Validated with `manage.py test tracker.tests.test_graphql_api`
+  and `manage.py check`.
+
+## Done: Twenty D5/D6 live delivery and workspace polish
+- `sync_twenty_crm --push` now uses a backend `TwentyClient` to deliver changed projection
+  rows to Twenty custom-object REST endpoints. Full-inventory sync is the default.
+- Delivery stores `twenty_record_id`, `twenty_url`, `last_synced_at`, and `last_error` on
+  `TwentySyncRecord`; unchanged rows with a stored Twenty id are skipped on later pushes.
+- `bootstrap_twenty_schema` creates/verifies the GCLBA custom objects, fields, views,
+  navigation entries, and read-only role through Twenty's metadata API.
+- Live Railway Backend has `TWENTY_BASE_URL`, `TWENTY_FRONTEND_URL`, and `TWENTY_API_KEY`
+  configured. The key is not stored in this repo.
+- Live Twenty workspace was bootstrapped and populated on 2026-07-08:
+  798 `gclbaProperties`, 710 `gclbaOutreachRecords`, and 798
+  `gclbaHomeQualityObservations`, with `TwentySyncRecord` at 2306 delivered, 0 errors,
+  0 pending.
+- Validated with `manage.py test tracker.tests.test_twenty_sync tracker.tests.test_twenty_schema`
+  plus live Railway `sync_twenty_crm --push` and Twenty REST spot checks.
+
+## Done: Property intelligence D9/D10 report and share package
+- Weekly compliance reports now include computed Coverage and Discoveries lines from the
+  same property-intelligence summary used by GraphQL.
+- `generate_property_intelligence_share_package` exports the one-page plain-language share
+  package as text, HTML, and PDF from current Django data.
+- The generated report/share paths avoid em dashes in text and HTML.
+- Validated with `manage.py test tracker.tests.test_property_intelligence_reporting`.
+
 ## Remaining
+- Data/index: D1-D4 still need the separate private `gclba-index` service that embeds the
+  pinned Datawave crates and emits the JSON imported by `import_index_dossiers`.
+- Map: D8 still needs the frontend coverage layer and parcel-card provenance wired to the
+  live GraphQL property-intelligence fields.
 - Claude (small/optional): buyer-photo EXIF GPS extraction (shared upload path; coordinate before
   editing api.py/workflow_documents); 4b buyer self-service public surface (new narrow scoped
   endpoint); service-line sync (lowest priority, source not yet resolved); aerial/street-level

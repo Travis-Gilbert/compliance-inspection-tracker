@@ -6,7 +6,7 @@ from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 
 from tracker.models import DataSource, NeighborhoodContextScore, ParcelValueSnapshot, Property
-from tracker.services.context import lisa
+from tracker.services.context import composite, lisa, signals
 from tracker.services.ingest import arcgis_sync, sources
 from tracker.services.ingest.arcgis_client import ArcGisClient
 from tracker.services.ingest.arcgis_resolver import resolve_arcgis_layer
@@ -294,6 +294,30 @@ class GclbaIngestContextTests(TestCase):
 
         self.assertEqual(result["computed"], 4)
         self.assertEqual(NeighborhoodContextScore.objects.count(), 4)
+
+    def test_composite_orients_distress_as_lower_performance(self):
+        self.assertEqual(signals.SIGNAL_ORIENTATION["tax_distress"], -1.0)
+        statuses = ["", "CFD", "NCFD", "NCFD"]
+        for index, status in enumerate(statuses):
+            Property.objects.create(
+                address=f"{index} Composite Ave",
+                parcel_id=f"41-00-100-00{index}",
+                latitude=43.0 + index * 0.001,
+                longitude=-83.7 + index * 0.001,
+                forfeiture_status=status,
+            )
+
+        result = composite.compute_composite(
+            neighborhood_def="knn1",
+            k=1,
+            weights={"tax_distress": 1.0},
+            seed=7,
+        )
+
+        self.assertEqual(result["computed"], 4)
+        no_distress = NeighborhoodContextScore.objects.get(parcel_id="41-00-100-000")
+        high_distress = NeighborhoodContextScore.objects.get(parcel_id="41-00-100-002")
+        self.assertGreater(no_distress.parcel_value, high_distress.parcel_value)
 
     def test_compute_context_scores_faceblock_groups_by_street(self):
         # Three parcels on the same street + one on a unique street. faceblock

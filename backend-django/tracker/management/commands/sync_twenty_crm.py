@@ -14,7 +14,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--all",
             action="store_true",
-            help="sync all properties instead of the default first 50",
+            help="sync all properties; this is now the default and kept for compatibility",
         )
         parser.add_argument(
             "--as-of",
@@ -27,10 +27,20 @@ class Command(BaseCommand):
             help="build candidates and print counts without writing TwentySyncRecord rows",
         )
         parser.add_argument(
+            "--push",
+            action="store_true",
+            help="push changed projection rows to the configured Twenty workspace",
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="with --push, deliver every projected row even when the local payload hash is unchanged",
+        )
+        parser.add_argument(
             "--limit",
             type=int,
-            default=50,
-            help="property cohort size; ignored when --all is provided",
+            default=None,
+            help="optional property cohort size for a small smoke; omitted means full inventory",
         )
         parser.add_argument(
             "--object",
@@ -53,19 +63,25 @@ class Command(BaseCommand):
             except ValueError as exc:
                 raise CommandError("--as-of must use YYYY-MM-DD") from exc
 
-        result = sync_twenty_projection(
-            as_of=as_of,
-            dry_run=opts["dry_run"],
-            limit=None if opts["all"] else opts["limit"],
-            objects=opts["objects"] or DEFAULT_OBJECTS,
-            tenant_id=opts["tenant_id"],
-        )
+        try:
+            result = sync_twenty_projection(
+                as_of=as_of,
+                dry_run=opts["dry_run"],
+                limit=None if opts["all"] or opts["limit"] is None else opts["limit"],
+                objects=opts["objects"] or DEFAULT_OBJECTS,
+                tenant_id=opts["tenant_id"],
+                push=opts["push"],
+                force=opts["force"],
+            )
+        except ValueError as exc:
+            raise CommandError(str(exc)) from exc
 
         prefix = "dry-run " if opts["dry_run"] else ""
         self.stdout.write(
             self.style.SUCCESS(
                 f"{prefix}twenty sync candidates={result.candidates} "
                 f"projected={result.projected} created={result.created} "
-                f"updated={result.updated} unchanged={result.unchanged}"
+                f"updated={result.updated} unchanged={result.unchanged} "
+                f"delivered={result.delivered} failed={result.failed}"
             )
         )

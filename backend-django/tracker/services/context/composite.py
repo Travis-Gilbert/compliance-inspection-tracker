@@ -8,7 +8,16 @@ the composite so it carries its own cluster classification.
 
 from __future__ import annotations
 
+import numpy as np
+
 DEFAULT_WEIGHTS = {"tax_distress": 0.5, "sale_recency": 0.2, "compliance": 0.3}
+
+
+def _standardize(values: np.ndarray) -> np.ndarray:
+    std = values.std()
+    if std == 0:
+        return np.zeros_like(values)
+    return (values - values.mean()) / std
 
 
 def compute_composite(
@@ -20,7 +29,6 @@ def compute_composite(
     significance: float = 0.05,
     seed: int | None = None,
 ):
-    import numpy as np
     from django.utils import timezone
 
     from tracker.models import NeighborhoodContextScore, Property
@@ -35,16 +43,36 @@ def compute_composite(
     if parcel_ids:
         qs = qs.filter(parcel_id__in=list(parcel_ids))
 
+    parcels = list(qs)
+    prop_by_id: dict = {}
+    oriented_by_signal: dict[str, dict[str, float]] = {}
+
+    for sig in blend:
+        signal_values: list[float] = []
+        signal_ids: list[str] = []
+        for prop in parcels:
+            value = signals_mod.signal_value(sig, prop, today=today)
+            if value is None:
+                continue
+            parcel_id = prop.parcel_id
+            signal_ids.append(parcel_id)
+            signal_values.append(float(value))
+            prop_by_id[parcel_id] = prop
+
+        if not signal_values:
+            continue
+        raw = np.asarray(signal_values, dtype=float)
+        oriented = _standardize(raw) * signals_mod.SIGNAL_ORIENTATION.get(sig, 1.0)
+        oriented_by_signal[sig] = dict(zip(signal_ids, oriented.tolist()))
+
     ids: list[str] = []
     coords: list[tuple[float, float]] = []
     values: list[float] = []
-    prop_by_id: dict = {}
-    for prop in qs:
-        if prop.latitude is None or prop.longitude is None:
-            continue
-        num = wsum = 0.0
+    for prop in parcels:
+        num = 0.0
+        wsum = 0.0
         for sig, weight in blend.items():
-            value = signals_mod.signal_value(sig, prop, today=today)
+            value = oriented_by_signal.get(sig, {}).get(prop.parcel_id)
             if value is None:
                 continue
             num += weight * value

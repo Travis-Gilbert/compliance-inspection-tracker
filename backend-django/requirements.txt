@@ -28,8 +28,21 @@ geopandas>=1.0,<2.0
 Pillow>=11.0,<12.0
 numpy>=2.1,<3.0
 
+# Photo intake optional stack (NAIP COG chips + R2). ArcGIS exportImage is the
+# fallback when rasterio is unavailable; boto3 is only required when R2_* is set.
+pystac-client>=0.8,<1.0
+planetary-computer>=1.0,<2.0
+# rasterio>=1.4,<2.0  # optional; needs GDAL. Uncomment when the host has libgdal.
+boto3>=1.35,<2.0
+
 # Address parsing
 usaddress>=0.5,<1.0
+
+# Photo intake (optional heavy deps — install for NAIP COG chips)
+# pystac-client>=0.8,<1.0
+# planetary-computer>=1.0,<2.0
+# rasterio>=1.3,<2.0
+# boto3>=1.34,<2.0
 
 # ASGI server
 gunicorn>=22.0,<24.0

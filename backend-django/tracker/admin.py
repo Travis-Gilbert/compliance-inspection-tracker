@@ -9,6 +9,7 @@ from tracker.models import (
     Note,
     Program,
     Property,
+    PropertyImageEvidence,
     PropertyPhoto,
     TaxSnapshot,
 )
@@ -57,6 +58,28 @@ class PropertyPhotoAdmin(admin.ModelAdmin):
     list_filter = ["side", "is_primary", "proximity_status"]
     search_fields = ["property__address", "property__parcel_id", "original_filename"]
     readonly_fields = ["uploaded_at", "updated_at", "distance_from_property_meters"]
+
+
+@admin.register(PropertyImageEvidence)
+class PropertyImageEvidenceAdmin(admin.ModelAdmin):
+    list_display = [
+        "property",
+        "image_source",
+        "capture_date",
+        "pano_id",
+        "sha256",
+        "superseded_by",
+        "ingested_at",
+    ]
+    list_filter = ["image_source", "source_license", "capture_date_precision"]
+    search_fields = [
+        "property__address",
+        "property__parcel_id",
+        "pano_id",
+        "storage_key",
+        "sha256",
+    ]
+    readonly_fields = ["ingested_at", "updated_at"]
 
 
 @admin.register(Communication)

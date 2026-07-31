@@ -1251,6 +1251,53 @@ def get_image(request, property_id: int, image_type: str):
     return FileResponse(path.open("rb"), filename=path.name, content_type="image/jpeg")
 
 
+@imagery_router.get("/pano/{pano_id}")
+async def render_streetview_pano(
+    request,
+    pano_id: str,
+    heading: float | None = None,
+    pitch: float = 0,
+    fov: float = 90,
+    size: str = "640x480",
+):
+    """
+    Licensed display proxy for Street View Static API by pano id.
+
+    Pixels are streamed to the client and never written to R2 / image_cache.
+    """
+    from django.conf import settings
+    import httpx
+    from django.http import HttpResponse
+
+    key = getattr(settings, "GOOGLE_MAPS_API_KEY", "") or ""
+    if not key:
+        return api.create_response(request, {"detail": "GOOGLE_MAPS_API_KEY not configured"}, status=503)
+    if not pano_id or len(pano_id) > 120:
+        return api.create_response(request, {"detail": "invalid pano_id"}, status=400)
+
+    params = {
+        "pano": pano_id,
+        "size": size,
+        "key": key,
+        "return_error_code": "true",
+        "source": "outdoor",
+        "fov": str(fov),
+        "pitch": str(pitch),
+    }
+    if heading is not None:
+        params["heading"] = str(heading)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(settings.STREETVIEW_URL, params=params)
+    if response.status_code != 200:
+        return api.create_response(
+            request,
+            {"detail": "Street View image unavailable", "status": response.status_code},
+            status=502,
+        )
+    return HttpResponse(response.content, content_type=response.headers.get("content-type", "image/jpeg"))
+
+
 # ============================================================
 # Detection Router
 # ============================================================

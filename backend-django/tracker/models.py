@@ -331,6 +331,109 @@ class PropertyPhoto(models.Model):
         return self.image.url
 
 
+class PropertyImageEvidence(models.Model):
+    """Canonical dated visual evidence for a property (photo intake pipeline).
+
+    Owned sources (NAIP, staff, etc.) store pixels via storage_key/sha256.
+    Licensed sources (Google Street View) store pointers only (pano_id + pose).
+    Capture dates are provider-supplied; never invent them.
+    """
+
+    SOURCE_CHOICES = [
+        ("STREET_VIEW", "Street View"),
+        ("HISTORICAL_STREET_VIEW", "Historical Street View"),
+        ("SATELLITE", "Satellite"),
+        ("NAIP_AERIAL", "NAIP aerial"),
+        ("MAPILLARY", "Mapillary"),
+        ("SURVEY_ARCHIVE", "Survey archive"),
+        ("BUYER_SUBMITTED", "Buyer submitted"),
+        ("STAFF_UPLOAD", "Staff upload"),
+        ("OTHER", "Other"),
+    ]
+    KIND_CHOICES = [
+        ("EXTERIOR", "Exterior"),
+        ("HISTORICAL_EXTERIOR", "Historical exterior"),
+        ("AERIAL", "Aerial"),
+        ("BEFORE", "Before"),
+        ("AFTER", "After"),
+        ("OTHER", "Other"),
+    ]
+    PRECISION_CHOICES = [
+        ("DAY", "Day"),
+        ("MONTH", "Month"),
+        ("YEAR", "Year"),
+    ]
+    LICENSE_CHOICES = [
+        ("PUBLIC_DOMAIN", "Public domain"),
+        ("CC_BY_SA", "CC BY-SA"),
+        ("ORG_OWNED", "Organization owned"),
+        ("LICENSED_DISPLAY_ONLY", "Licensed display only"),
+    ]
+
+    property = models.ForeignKey(
+        Property,
+        on_delete=models.CASCADE,
+        related_name="image_evidence",
+    )
+    image_source = models.CharField(max_length=40, choices=SOURCE_CHOICES, db_index=True)
+    image_kind = models.CharField(
+        max_length=30, choices=KIND_CHOICES, default="OTHER", db_index=True
+    )
+    capture_date = models.CharField(max_length=32, default="", blank=True, db_index=True)
+    capture_date_precision = models.CharField(
+        max_length=10, choices=PRECISION_CHOICES, default="", blank=True
+    )
+    storage_key = models.CharField(max_length=500, default="", blank=True, db_index=True)
+    sha256 = models.CharField(max_length=64, default="", blank=True, db_index=True)
+    pano_id = models.CharField(max_length=120, default="", blank=True, db_index=True)
+    source_license = models.CharField(
+        max_length=40, choices=LICENSE_CHOICES, default="", blank=True
+    )
+    footprint_meters = models.FloatField(null=True, blank=True)
+    heading_degrees = models.FloatField(null=True, blank=True)
+    pitch_degrees = models.FloatField(null=True, blank=True)
+    field_of_view = models.FloatField(null=True, blank=True)
+    image_url = models.TextField(default="", blank=True)
+    thumbnail_url = models.TextField(default="", blank=True)
+    attribution = models.CharField(max_length=255, default="", blank=True)
+    provider_record_id = models.CharField(max_length=255, default="", blank=True)
+    superseded_by = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="supersedes",
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    ingested_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["property_id", "capture_date", "id"]
+        indexes = [
+            models.Index(fields=["property", "image_source", "capture_date"]),
+            models.Index(fields=["property", "pano_id"]),
+            models.Index(fields=["sha256"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["property", "image_source", "capture_date"],
+                condition=Q(capture_date__gt="") & ~Q(image_source="HISTORICAL_STREET_VIEW"),
+                name="unique_owned_image_evidence_by_date",
+            ),
+            models.UniqueConstraint(
+                fields=["property", "image_source", "pano_id"],
+                condition=Q(pano_id__gt="")
+                & Q(image_source__in=["STREET_VIEW", "HISTORICAL_STREET_VIEW"]),
+                name="unique_licensed_image_evidence_by_pano",
+            ),
+        ]
+
+    def __str__(self):
+        label = self.capture_date or self.pano_id or self.sha256[:12] or "undated"
+        return f"{self.image_source} {label} for property {self.property_id}"
+
+
 class Communication(models.Model):
     """Communication log entries for a property."""
 

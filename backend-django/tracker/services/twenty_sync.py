@@ -422,6 +422,7 @@ def _property_queryset(*, limit: int | None) -> list[Property]:
             "action_items",
             "compliance_cases",
             "photos",
+            "image_evidence__superseded_by",
         )
         .order_by("id")
     )
@@ -720,6 +721,52 @@ def _home_quality_candidates(properties: Iterable[Property]) -> list[TwentySyncC
 def _image_evidence_candidates(properties: Iterable[Property]) -> list[TwentySyncCandidate]:
     candidates: list[TwentySyncCandidate] = []
     for prop in properties:
+        evidence_rows = list(prop.image_evidence.all()) if hasattr(prop, "image_evidence") else []
+        evidence_sources = {row.image_source for row in evidence_rows}
+        has_naip = "NAIP_AERIAL" in evidence_sources
+
+        # Canonical multi-vintage / pointer rows from photo intake.
+        for row in evidence_rows:
+            image_url = _public_image_url(row.image_url) if row.image_url else ""
+            if not image_url and row.storage_key:
+                image_url = _public_image_url(row.storage_key)
+            # Licensed pointers may only have a proxy path; still project them.
+            if not image_url and row.pano_id:
+                image_url = row.image_url or f"/api/imagery/pano/{row.pano_id}"
+            if not image_url and not row.pano_id:
+                continue
+            external_key = _intake_evidence_external_key(prop.id, row)
+            superseded_key = ""
+            if row.superseded_by_id and row.superseded_by:
+                superseded_key = _resolve_superseded_by_twenty_id(
+                    prop.id, row.superseded_by
+                )
+            candidates.append(
+                _image_evidence_candidate(
+                    prop,
+                    external_key=external_key,
+                    name=f"{_image_property_label(prop)} {row.image_kind.lower().replace('_', ' ')}",
+                    image_source=row.image_source,
+                    image_kind=row.image_kind,
+                    image_url=image_url,
+                    thumbnail_url=_public_image_url(row.thumbnail_url) or image_url,
+                    capture_date=row.capture_date,
+                    attribution=row.attribution,
+                    provider_record_id=row.provider_record_id or row.pano_id or row.sha256,
+                    observed_at=row.updated_at or row.ingested_at or prop.updated_at,
+                    capture_date_precision=row.capture_date_precision or None,
+                    storage_key=row.storage_key or None,
+                    sha256=row.sha256 or None,
+                    pano_id=row.pano_id or None,
+                    source_license=row.source_license or None,
+                    superseded_by=superseded_key or None,
+                    footprint_meters=_number(row.footprint_meters),
+                    heading_degrees=_number(row.heading_degrees),
+                    django_evidence_id=row.id,
+                )
+            )
+
+        # Legacy Property.* imagery fields — skip when intake already covers the source.
         image_rows = (
             {
                 "source": "STREET_VIEW",
@@ -729,6 +776,7 @@ def _image_evidence_candidates(properties: Iterable[Property]) -> list[TwentySyn
                 "attribution": "Google Street View",
                 "provider_record_id": prop.streetview_date or "",
                 "external_suffix": "streetview",
+                "skip": "STREET_VIEW" in evidence_sources,
             },
             {
                 "source": "HISTORICAL_STREET_VIEW",
@@ -738,6 +786,8 @@ def _image_evidence_candidates(properties: Iterable[Property]) -> list[TwentySyn
                 "attribution": "Google Street View",
                 "provider_record_id": prop.streetview_historical_date or "",
                 "external_suffix": "streetview_historical",
+                # Keep legacy historical until intake has at least one pointer row.
+                "skip": "HISTORICAL_STREET_VIEW" in evidence_sources,
             },
             {
                 "source": "SATELLITE",
@@ -747,9 +797,13 @@ def _image_evidence_candidates(properties: Iterable[Property]) -> list[TwentySyn
                 "attribution": "Google Static Maps satellite",
                 "provider_record_id": "",
                 "external_suffix": "satellite",
+                # Prefer NAIP / materialized satellite evidence over undated legacy.
+                "skip": "SATELLITE" in evidence_sources or has_naip,
             },
         )
         for row in image_rows:
+            if row["skip"]:
+                continue
             image_url = _public_image_url(row["path"])
             if not image_url:
                 continue
@@ -766,6 +820,7 @@ def _image_evidence_candidates(properties: Iterable[Property]) -> list[TwentySyn
                     attribution=row["attribution"],
                     provider_record_id=row["provider_record_id"],
                     observed_at=prop.imagery_fetched_at or prop.updated_at,
+                    source_license="LICENSED_DISPLAY_ONLY",
                 )
             )
 
@@ -792,9 +847,38 @@ def _image_evidence_candidates(properties: Iterable[Property]) -> list[TwentySyn
                     proximity_status=_twenty_proximity_status(photo.proximity_status),
                     match_distance_meters=_number(photo.distance_from_property_meters),
                     is_primary=photo.is_primary,
+                    source_license="ORG_OWNED",
                 )
             )
     return candidates
+
+
+def _intake_evidence_external_key(property_id: int, row: Any) -> str:
+    """Stable identity key: source + capture date (owned) or pano id (licensed)."""
+    source = row.image_source
+    if source in {"STREET_VIEW", "HISTORICAL_STREET_VIEW"} and row.pano_id:
+        return f"image_evidence:{property_id}:{source}:{row.pano_id}"
+    if row.capture_date:
+        return f"image_evidence:{property_id}:{source}:{row.capture_date}"
+    if row.sha256:
+        return f"image_evidence:{property_id}:{source}:sha:{row.sha256[:16]}"
+    return f"image_evidence:{property_id}:evidence:{row.id}"
+
+
+def _resolve_superseded_by_twenty_id(property_id: int, target: Any) -> str:
+    external_key = _intake_evidence_external_key(property_id, target)
+    record = (
+        TwentySyncRecord.objects.filter(
+            object_name="image_evidence",
+            external_key=external_key,
+        )
+        .exclude(twenty_record_id="")
+        .order_by("-updated_at")
+        .first()
+    )
+    if record and record.twenty_record_id:
+        return record.twenty_record_id
+    return external_key
 
 
 def _image_evidence_candidate(
@@ -811,9 +895,18 @@ def _image_evidence_candidate(
     provider_record_id: str,
     observed_at: dt.datetime | None,
     django_photo_id: int | None = None,
+    django_evidence_id: int | None = None,
     proximity_status: str = "NOT_APPLICABLE",
     match_distance_meters: float | int | None = None,
     is_primary: bool = False,
+    capture_date_precision: str | None = None,
+    storage_key: str | None = None,
+    sha256: str | None = None,
+    pano_id: str | None = None,
+    source_license: str | None = None,
+    superseded_by: str | None = None,
+    footprint_meters: float | int | None = None,
+    heading_degrees: float | int | None = None,
 ) -> TwentySyncCandidate:
     return TwentySyncCandidate(
         object_name="image_evidence",
@@ -824,6 +917,7 @@ def _image_evidence_candidate(
             "name": name,
             "djangoPropertyId": prop.id,
             "djangoPhotoId": django_photo_id,
+            "djangoEvidenceId": django_evidence_id,
             "parcelId": prop.parcel_id,
             "propertyAddress": prop.address or None,
             "imageSource": image_source,
@@ -831,6 +925,14 @@ def _image_evidence_candidate(
             "imageUrl": image_url,
             "thumbnailUrl": thumbnail_url or None,
             "captureDate": capture_date or None,
+            "captureDatePrecision": capture_date_precision,
+            "storageKey": storage_key,
+            "sha256": sha256,
+            "panoId": pano_id,
+            "sourceLicense": source_license,
+            "supersededBy": superseded_by,
+            "footprintMeters": footprint_meters,
+            "headingDegrees": heading_degrees,
             "attribution": attribution or None,
             "providerRecordId": provider_record_id or None,
             "qualityBand": _quality_band(prop),
@@ -848,6 +950,8 @@ def _image_evidence_candidate(
             "imageKind": image_kind,
             "imageUrl": image_url,
             "djangoPhotoId": django_photo_id,
+            "djangoEvidenceId": django_evidence_id,
+            "supersededBy": superseded_by,
         },
     )
 

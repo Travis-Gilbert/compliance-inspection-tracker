@@ -158,3 +158,19 @@ GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 # Image cache directory (separate from MEDIA_ROOT if desired)
 IMAGE_CACHE_DIR = Path(env("IMAGE_CACHE_DIR", default=str(MEDIA_ROOT)))
 IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Photo intake (NAIP chips + licensed Street View pointers)
+NAIP_FOOTPRINT_METERS = env.float("NAIP_FOOTPRINT_METERS", default=60.0)
+NAIP_OUTPUT_SIZE = env.int("NAIP_OUTPUT_SIZE", default=512)
+NAIP_EXPORT_URL = env(
+    "NAIP_EXPORT_URL",
+    default="https://gis.apfo.usda.gov/arcgis/rest/services/NAIP/USDA_CONUS_PRIME/ImageServer/exportImage",
+)
+
+# Cloudflare R2 (owned pixels). When unset, intake writes under IMAGE_CACHE_DIR.
+R2_ACCOUNT_ID = env("R2_ACCOUNT_ID", default="")
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
+R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="")
+R2_PUBLIC_URL = env("R2_PUBLIC_URL", default="")
+R2_REGION = env("R2_REGION", default="auto")

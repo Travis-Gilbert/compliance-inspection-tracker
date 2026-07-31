@@ -43,6 +43,17 @@ const NAV_GROUPS = [
         ),
       },
       {
+        path: "/weekly-report",
+        label: "Weekly Report",
+        icon: (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 1.5h6l2 2V14a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 14v-1" />
+            <path d="M10 1.5V4h2" />
+            <path d="M1.5 5.5h7M1.5 8h7M1.5 10.5h4" />
+          </svg>
+        ),
+      },
+      {
         path: "/map",
         label: "Compliance Map",
         icon: (

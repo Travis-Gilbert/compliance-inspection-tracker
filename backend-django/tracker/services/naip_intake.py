@@ -93,6 +93,26 @@ def search_naip_items(lat: float, lon: float, *, footprint_meters: float):
     return items
 
 
+def planetary_computer_bbox_url(item_id: str, bbox: list[float], output_size: int) -> str:
+    west, south, east, north = bbox
+    from urllib.parse import urlencode
+
+    query = urlencode(
+        {
+            "collection": "naip",
+            "item": item_id,
+            "assets": "image",
+            "asset_bidx": "image|1,2,3",
+            "width": str(output_size),
+            "height": str(output_size),
+        }
+    )
+    return (
+        "https://planetarycomputer.microsoft.com/api/data/v1/item/"
+        f"bbox/{west},{south},{east},{north}.png?{query}"
+    )
+
+
 def _chip_via_planetary_computer_bbox(
     item_id: str,
     bbox: list[float],
@@ -234,15 +254,17 @@ def upsert_naip_evidence(
     footprint_meters: float,
     provider_record_id: str = "",
     metadata: Optional[dict] = None,
+    image_url: str | None = None,
 ) -> tuple[PropertyImageEvidence, bool]:
     """Return (row, created)."""
+    display_url = (image_url or stored.public_url or "").strip()
     defaults = {
         "image_kind": "AERIAL",
         "capture_date_precision": capture_date_precision,
         "storage_key": stored.storage_key,
         "sha256": stored.sha256,
-        "image_url": stored.public_url,
-        "thumbnail_url": stored.public_url,
+        "image_url": display_url,
+        "thumbnail_url": display_url,
         "source_license": "PUBLIC_DOMAIN",
         "attribution": NAIP_ATTRIBUTION,
         "provider_record_id": provider_record_id or capture_date,
@@ -323,16 +345,30 @@ def intake_naip_for_property(
                 source="NAIP_AERIAL",
                 capture_date=capture_date,
             )
+            item_id = getattr(item, "id", "") or ""
+            # Prefer Planetary Computer bbox URLs for Twenty display until R2
+            # serves public pixels; storage_key/sha256 still identify owned bytes.
+            from tracker.services.photo_storage import _r2_configured
+
+            display_url = stored.public_url
+            if item_id and not _r2_configured():
+                display_url = planetary_computer_bbox_url(
+                    item_id, _bbox_for_point(lat, lon, footprint), size,
+                )
             _row, created = upsert_naip_evidence(
                 prop,
                 capture_date=capture_date,
                 capture_date_precision=precision,
                 stored=stored,
                 footprint_meters=footprint,
-                provider_record_id=getattr(item, "id", "") or capture_date,
+                provider_record_id=item_id or capture_date,
+                image_url=display_url,
                 metadata={
-                    "stac_id": getattr(item, "id", ""),
+                    "stac_id": item_id,
                     "ingested_at": timezone.now().isoformat(),
+                    "display_url_strategy": "planetary_computer_bbox"
+                    if display_url != stored.public_url
+                    else "storage_public_url",
                 },
             )
             if created:

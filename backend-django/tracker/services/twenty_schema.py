@@ -444,7 +444,7 @@ GCLBA_OBJECTS: tuple[ObjectSpec, ...] = (
                     ("STREET_VIEW", "Street View", "blue"),
                     ("HISTORICAL_STREET_VIEW", "Historical Street View", "purple"),
                     ("SATELLITE", "Satellite", "green"),
-                    ("NAIP_AERIAL", "NAIP aerial", "teal"),
+                    ("NAIP_AERIAL", "NAIP aerial", "green"),
                     ("MAPILLARY", "Mapillary", "orange"),
                     ("SURVEY_ARCHIVE", "Survey archive", "gray"),
                     ("BUYER_SUBMITTED", "Buyer submitted", "red"),

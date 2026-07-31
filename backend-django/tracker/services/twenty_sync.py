@@ -48,6 +48,17 @@ OBJECT_API_NAMES = {
     "image_evidence": "gclbaImageEvidenceItems",
 }
 
+# Twenty frontend deep links use nameSingular; REST uses namePlural.
+OBJECT_UI_NAMES = {
+    "gclbaProperties": "gclbaProperty",
+    "gclbaOutreachRecords": "gclbaOutreachRecord",
+    "gclbaComplianceCases": "gclbaComplianceCase",
+    "gclbaSourceConflicts": "gclbaSourceConflict",
+    "gclbaValuationSnapshots": "gclbaValuationSnapshot",
+    "gclbaHomeQualityObservations": "gclbaHomeQualityObservation",
+    "gclbaImageEvidenceItems": "gclbaImageEvidence",
+}
+
 
 @dataclass(frozen=True)
 class TwentySyncCandidate:
@@ -258,7 +269,8 @@ def _retry_after_seconds(response: httpx.Response) -> float:
 def _record_url(frontend_url: str, object_api_name: str, record_id: str) -> str:
     if not frontend_url or not record_id:
         return ""
-    return f"{frontend_url.rstrip('/')}/object/{object_api_name}/{record_id}"
+    ui_name = OBJECT_UI_NAMES.get(object_api_name, object_api_name)
+    return f"{frontend_url.rstrip('/')}/object/{ui_name}/{record_id}"
 
 
 def build_twenty_sync_candidates(
